@@ -150,6 +150,15 @@ class GithubCopilotConfig(OpenAIConfig):
             if "reasoning_effort" in result and isinstance(result["reasoning_effort"], dict):
                 result["reasoning_effort"] = result["reasoning_effort"].get("effort", "high")
 
+            # context_management: move into extra_body for Claude models
+            # (Copilot Claude uses Anthropic-format context_management)
+            extra_body = result.get("extra_body", {}) or {}
+            cm = result.pop("context_management", None) or non_default_params.get("context_management")
+            if cm is not None:
+                extra_body["context_management"] = cm
+            if extra_body:
+                result["extra_body"] = extra_body
+
         elif model.lower().startswith(("gpt-", "o1", "o3", "o4")):
             # super() may flatten dict reasoning_effort to a plain string,
             # losing the "summary" field. Restore the original dict if needed.
@@ -157,6 +166,22 @@ class GithubCopilotConfig(OpenAIConfig):
                 original = non_default_params.get("reasoning_effort")
                 if isinstance(original, dict) and isinstance(result["reasoning_effort"], str):
                     result["reasoning_effort"] = original
+
+            # context_management: convert Anthropic format → OpenAI format if needed
+            # Anthropic: {"edits": [{"type": "compact_20260112", "trigger": {...}}]}
+            # OpenAI:   [{"type": "compaction", "compact_threshold": 200000}]
+            cm = result.pop("context_management", None) or non_default_params.get("context_management")
+            if cm is not None:
+                if isinstance(cm, dict) and "edits" in cm:
+                    from litellm.llms.anthropic.experimental_pass_through.responses_adapters.transformation import (
+                        LiteLLMAnthropicToResponsesAPIAdapter,
+                    )
+                    converted = LiteLLMAnthropicToResponsesAPIAdapter.translate_context_management_to_responses_api(cm)
+                    if converted is not None:
+                        result["context_management"] = converted
+                elif isinstance(cm, list):
+                    # Already in OpenAI format — pass through
+                    result["context_management"] = cm
 
         # ── Universal constraints ──
         # Clamp max_tokens / max_output_tokens to Copilot's minimum (16).
@@ -202,6 +227,12 @@ class GithubCopilotConfig(OpenAIConfig):
                     base_params.append("thinking")
                 if "reasoning_effort" not in base_params:
                     base_params.append("reasoning_effort")
+            if "context_management" not in base_params:
+                base_params.append("context_management")
+
+        elif model.lower().startswith(("gpt-", "o1", "o3", "o4")):
+            if "context_management" not in base_params:
+                base_params.append("context_management")
 
         return base_params
 
