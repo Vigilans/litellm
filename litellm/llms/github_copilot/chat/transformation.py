@@ -106,27 +106,42 @@ class GithubCopilotConfig(OpenAIConfig):
 
         return validated_headers
 
+    @staticmethod
+    def _normalize_claude_model_name(model: str) -> str:
+        """
+        Normalize Claude model names from Copilot's dot notation to litellm's
+        hyphen notation for capability lookups.
+
+        e.g. "claude-sonnet-4.6" -> "claude-sonnet-4-6"
+             "claude-opus-4.6" -> "claude-opus-4-6"
+             "claude-opus-4.6-xxxx" -> "claude-opus-4-6"
+        """
+        import re
+
+        normalized = model.lower()
+        # Strip trailing context-window suffixes (e.g. "-1m")
+        normalized = re.sub(r"-\d+m$", "", normalized)
+        # Replace dot between major.minor version with hyphen
+        # e.g. "claude-opus-4.6" -> "claude-opus-4-6"
+        normalized = re.sub(r"(\d+)\.(\d+)$", r"\1-\2", normalized)
+        return normalized
+
     def get_supported_openai_params(self, model: str) -> list:
         """
         Get supported OpenAI parameters for GitHub Copilot.
-
-        For Claude models that support extended thinking (Claude 4 family and Claude 3-7), includes thinking and reasoning_effort parameters.
-        For other models, returns standard OpenAI parameters (which may include reasoning_effort for o-series models).
+        Branches by model family to add family-specific params.
         """
         from litellm.utils import supports_reasoning
 
-        # Get base OpenAI parameters
         base_params = super().get_supported_openai_params(model)
 
-        # Add Claude-specific parameters for models that support extended thinking
-        if "claude" in model.lower() and supports_reasoning(
-            model=model.lower(),
-        ):
-            if "thinking" not in base_params:
-                base_params.append("thinking")
-            # reasoning_effort is not included by parent for Claude models, so add it
-            if "reasoning_effort" not in base_params:
-                base_params.append("reasoning_effort")
+        if "claude" in model.lower():
+            claude_model = self._normalize_claude_model_name(model)
+            if supports_reasoning(model=claude_model):
+                if "thinking" not in base_params:
+                    base_params.append("thinking")
+                if "reasoning_effort" not in base_params:
+                    base_params.append("reasoning_effort")
 
         return base_params
 
