@@ -1386,6 +1386,8 @@ def _extract_reasoning_content(message: dict) -> Tuple[Optional[str], Optional[s
     message_content = message.get("content")
     if "reasoning_content" in message:
         return message["reasoning_content"], message_content
+    elif "reasoning_text" in message:
+        return message["reasoning_text"], message_content
     elif "reasoning" in message:
         return message["reasoning"], message_content
     elif isinstance(message_content, str):
