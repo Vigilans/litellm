@@ -106,6 +106,66 @@ class GithubCopilotConfig(OpenAIConfig):
 
         return validated_headers
 
+    def map_openai_params(
+        self,
+        non_default_params: dict,
+        optional_params: dict,
+        model: str,
+        drop_params: bool,
+    ) -> dict:
+        result = super().map_openai_params(
+            non_default_params=non_default_params,
+            optional_params=optional_params,
+            model=model,
+            drop_params=drop_params,
+        )
+
+        # ── Convert thinking → reasoning_effort (all models) ──
+        # Copilot's chat/completions only recognises reasoning_effort — even for
+        # Claude models. Convert thinking → reasoning_effort for all families.
+        thinking = result.pop("thinking", None) or non_default_params.get("thinking")
+        if thinking is not None and "reasoning_effort" not in result:
+            from litellm.llms.anthropic.experimental_pass_through.adapters.transformation import (
+                LiteLLMAnthropicMessagesAdapter,
+            )
+            from litellm.llms.anthropic.experimental_pass_through.utils import (
+                is_reasoning_auto_summary_enabled,
+            )
+
+            effort = LiteLLMAnthropicMessagesAdapter.translate_anthropic_thinking_to_reasoning_effort(thinking)
+            if effort is not None:
+                summary = thinking.get("summary") if isinstance(thinking, dict) else None
+                auto_summary = is_reasoning_auto_summary_enabled()
+                if summary:
+                    result["reasoning_effort"] = {"effort": effort, "summary": summary}
+                elif auto_summary:
+                    result["reasoning_effort"] = {"effort": effort, "summary": "detailed"}
+                else:
+                    result["reasoning_effort"] = effort
+
+        # ── Model-family adjustments ──
+        if "claude" in model.lower():
+            # Copilot Claude rejects dict reasoning_effort ({"effort":…,"summary":…})
+            # with 400 "got object, want string". Flatten to plain string.
+            if "reasoning_effort" in result and isinstance(result["reasoning_effort"], dict):
+                result["reasoning_effort"] = result["reasoning_effort"].get("effort", "high")
+
+        elif model.lower().startswith(("gpt-", "o1", "o3", "o4")):
+            # super() may flatten dict reasoning_effort to a plain string,
+            # losing the "summary" field. Restore the original dict if needed.
+            if "reasoning_effort" in result:
+                original = non_default_params.get("reasoning_effort")
+                if isinstance(original, dict) and isinstance(result["reasoning_effort"], str):
+                    result["reasoning_effort"] = original
+
+        # ── Universal constraints ──
+        # Clamp max_tokens / max_output_tokens to Copilot's minimum (16).
+        for key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
+            if key in result and isinstance(result[key], int) and result[key] < 16:
+                result[key] = 16
+
+        return result
+
     @staticmethod
     def _normalize_claude_model_name(model: str) -> str:
         """
