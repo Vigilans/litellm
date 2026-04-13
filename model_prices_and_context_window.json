@@ -18131,6 +18131,36 @@
         "supports_parallel_function_calling": true,
         "supports_vision": true
     },
+    "github_copilot/claude-opus-4.7": {
+        "litellm_provider": "github_copilot",
+        "max_input_tokens": 128000,
+        "max_output_tokens": 128000,
+        "max_tokens": 128000,
+        "mode": "chat",
+        "supported_endpoints": [
+            "/v1/chat/completions"
+        ],
+        "supports_function_calling": true,
+        "supports_parallel_function_calling": true,
+        "supports_reasoning": true,
+        "supports_minimal_reasoning_effort": true,
+        "supports_vision": true
+    },
+    "github_copilot/claude-opus-4.8": {
+        "litellm_provider": "github_copilot",
+        "max_input_tokens": 128000,
+        "max_output_tokens": 16000,
+        "max_tokens": 16000,
+        "mode": "chat",
+        "supported_endpoints": [
+            "/v1/chat/completions"
+        ],
+        "supports_function_calling": true,
+        "supports_parallel_function_calling": true,
+        "supports_reasoning": true,
+        "supports_vision": true,
+        "supports_minimal_reasoning_effort": true
+    },
     "github_copilot/claude-opus-41": {
         "litellm_provider": "github_copilot",
         "max_input_tokens": 80000,
@@ -18325,7 +18355,10 @@
         "supports_function_calling": true,
         "supports_parallel_function_calling": true,
         "supports_response_schema": true,
-        "supports_vision": true
+        "supports_vision": true,
+        "supports_xhigh_reasoning_effort": false,
+        "supports_none_reasoning_effort": false,
+        "supports_minimal_reasoning_effort": true
     },
     "github_copilot/gpt-5-mini": {
         "litellm_provider": "github_copilot",
@@ -18336,7 +18369,10 @@
         "supports_function_calling": true,
         "supports_parallel_function_calling": true,
         "supports_response_schema": true,
-        "supports_vision": true
+        "supports_vision": true,
+        "supports_xhigh_reasoning_effort": false,
+        "supports_none_reasoning_effort": false,
+        "supports_minimal_reasoning_effort": true
     },
     "github_copilot/gpt-5.1": {
         "litellm_provider": "github_copilot",
@@ -18351,7 +18387,10 @@
         "supports_function_calling": true,
         "supports_parallel_function_calling": true,
         "supports_response_schema": true,
-        "supports_vision": true
+        "supports_vision": true,
+        "supports_xhigh_reasoning_effort": false,
+        "supports_none_reasoning_effort": true,
+        "supports_minimal_reasoning_effort": true
     },
     "github_copilot/gpt-5.1-codex-max": {
         "litellm_provider": "github_copilot",
@@ -18365,7 +18404,10 @@
         "supports_function_calling": true,
         "supports_parallel_function_calling": true,
         "supports_response_schema": true,
-        "supports_vision": true
+        "supports_vision": true,
+        "supports_xhigh_reasoning_effort": true,
+        "supports_none_reasoning_effort": false,
+        "supports_minimal_reasoning_effort": true
     },
     "github_copilot/gpt-5.2": {
         "litellm_provider": "github_copilot",
@@ -18380,7 +18422,10 @@
         "supports_function_calling": true,
         "supports_parallel_function_calling": true,
         "supports_response_schema": true,
-        "supports_vision": true
+        "supports_vision": true,
+        "supports_xhigh_reasoning_effort": true,
+        "supports_none_reasoning_effort": true,
+        "supports_minimal_reasoning_effort": true
     },
     "github_copilot/gpt-5.3-codex": {
         "litellm_provider": "github_copilot",
@@ -18394,7 +18439,10 @@
         "supports_function_calling": true,
         "supports_parallel_function_calling": true,
         "supports_response_schema": true,
-        "supports_vision": true
+        "supports_vision": true,
+        "supports_xhigh_reasoning_effort": false,
+        "supports_none_reasoning_effort": false,
+        "supports_minimal_reasoning_effort": true
     },
     "github_copilot/text-embedding-3-small": {
         "litellm_provider": "github_copilot",
