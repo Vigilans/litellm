@@ -1903,6 +1903,9 @@ if TYPE_CHECKING:
     from .llms.github_copilot.embedding.transformation import (
         GithubCopilotEmbeddingConfig as GithubCopilotEmbeddingConfig,
     )
+    from .llms.github_copilot.messages.transformation import (
+        GithubCopilotAnthropicMessagesConfig as GithubCopilotAnthropicMessagesConfig,
+    )
     from .llms.chatgpt.chat.transformation import ChatGPTConfig as ChatGPTConfig
     from .llms.chatgpt.responses.transformation import (
         ChatGPTResponsesAPIConfig as ChatGPTResponsesAPIConfig,
