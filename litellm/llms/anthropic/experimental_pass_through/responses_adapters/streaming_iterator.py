@@ -41,8 +41,10 @@ class AnthropicResponsesStreamWrapper:
         self.model = model
         self._message_id: str = f"msg_{uuid.uuid4()}"
         self._current_block_index: int = -1
-        # Map item_id -> content_block_index so we can stop the right block later
-        self._item_id_to_block_index: Dict[str, int] = {}
+        # Map output_index -> content_block_index for non-reasoning blocks.
+        # Uses output_index instead of item_id because Copilot encrypts
+        # item_ids differently per event, making them unreliable as keys.
+        self._output_idx_to_block_index: Dict[int, int] = {}
         # Track open function_call items by item_id so we can emit tool_use start
         self._pending_tool_ids: Dict[str, str] = (
             {}
@@ -101,14 +103,14 @@ class AnthropicResponsesStreamWrapper:
             item_type = getattr(item, "type", None) or (
                 item.get("type") if isinstance(item, dict) else None
             )
-            item_id = getattr(item, "id", None) or (
-                item.get("id") if isinstance(item, dict) else None
-            )
+            output_index = getattr(event, "output_index", None)
+            if output_index is None and isinstance(event, dict):
+                output_index = event.get("output_index")
 
             if item_type == "message":
                 block_idx = self._next_block_index()
-                if item_id:
-                    self._item_id_to_block_index[item_id] = block_idx
+                if output_index is not None:
+                    self._output_idx_to_block_index[output_index] = block_idx
                 self._chunk_queue.append(
                     {
                         "type": "content_block_start",
@@ -117,6 +119,9 @@ class AnthropicResponsesStreamWrapper:
                     }
                 )
             elif item_type == "function_call":
+                item_id = getattr(item, "id", None) or (
+                    item.get("id") if isinstance(item, dict) else None
+                )
                 call_id = (
                     getattr(item, "call_id", None)
                     or (item.get("call_id") if isinstance(item, dict) else None)
@@ -128,8 +133,9 @@ class AnthropicResponsesStreamWrapper:
                     or ""
                 )
                 block_idx = self._next_block_index()
+                if output_index is not None:
+                    self._output_idx_to_block_index[output_index] = block_idx
                 if item_id:
-                    self._item_id_to_block_index[item_id] = block_idx
                     self._pending_tool_ids[item_id] = call_id
                 self._chunk_queue.append(
                     {
@@ -151,15 +157,15 @@ class AnthropicResponsesStreamWrapper:
 
         # ---- text delta ----
         if event_type == "response.output_text.delta":
-            item_id = getattr(event, "item_id", None) or (
-                event.get("item_id") if isinstance(event, dict) else None
-            )
+            output_index = getattr(event, "output_index", None)
+            if output_index is None and isinstance(event, dict):
+                output_index = event.get("output_index")
             delta = getattr(event, "delta", "") or (
                 event.get("delta", "") if isinstance(event, dict) else ""
             )
             block_idx = (
-                self._item_id_to_block_index.get(item_id, self._current_block_index)
-                if item_id
+                self._output_idx_to_block_index.get(output_index, self._current_block_index)
+                if output_index is not None
                 else self._current_block_index
             )
             self._chunk_queue.append(
@@ -203,15 +209,15 @@ class AnthropicResponsesStreamWrapper:
 
         # ---- function call arguments delta ----
         if event_type == "response.function_call_arguments.delta":
-            item_id = getattr(event, "item_id", None) or (
-                event.get("item_id") if isinstance(event, dict) else None
-            )
+            output_index = getattr(event, "output_index", None)
+            if output_index is None and isinstance(event, dict):
+                output_index = event.get("output_index")
             delta = getattr(event, "delta", "") or (
                 event.get("delta", "") if isinstance(event, dict) else ""
             )
             block_idx = (
-                self._item_id_to_block_index.get(item_id, self._current_block_index)
-                if item_id
+                self._output_idx_to_block_index.get(output_index, self._current_block_index)
+                if output_index is not None
                 else self._current_block_index
             )
             self._chunk_queue.append(
@@ -247,15 +253,12 @@ class AnthropicResponsesStreamWrapper:
             )
             if item_type == "reasoning":
                 return
-            item_id = (
-                getattr(item, "id", None)
-                or (item.get("id") if isinstance(item, dict) else None)
-                if item
-                else None
-            )
+            output_index = getattr(event, "output_index", None)
+            if output_index is None and isinstance(event, dict):
+                output_index = event.get("output_index")
             block_idx = (
-                self._item_id_to_block_index.get(item_id, self._current_block_index)
-                if item_id
+                self._output_idx_to_block_index.get(output_index, self._current_block_index)
+                if output_index is not None
                 else self._current_block_index
             )
             self._chunk_queue.append(
