@@ -25,10 +25,8 @@ DEFAULT_GITHUB_API_KEY_URL = "https://api.github.com/copilot_internal/v2/token"
 
 
 class Authenticator:
-    def __init__(self) -> None:
-        """Initialize the GitHub Copilot authenticator with configurable token paths."""
-        # Token storage paths
-        self.token_dir = os.getenv(
+    def __init__(self, token_dir: Optional[str] = None) -> None:
+        self.token_dir = token_dir or os.getenv(
             "GITHUB_COPILOT_TOKEN_DIR",
             os.path.expanduser("~/.config/litellm/github_copilot"),
         )

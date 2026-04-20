@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import os
 
@@ -15,6 +15,8 @@ from ..common_utils import (
 
 
 class GithubCopilotConfig(OpenAIConfig):
+    _authenticators: Dict[Optional[str], Authenticator] = {}
+
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -22,7 +24,21 @@ class GithubCopilotConfig(OpenAIConfig):
         custom_llm_provider: str = "openai",
     ) -> None:
         super().__init__()
-        self.authenticator = Authenticator()
+        self.authenticator = self._get_authenticator(None)
+
+    @classmethod
+    def _get_authenticator(cls, auth_profile: Optional[str]) -> Authenticator:
+        if auth_profile not in cls._authenticators:
+            if auth_profile is None:
+                token_dir = None
+            else:
+                base_dir = os.getenv(
+                    "GITHUB_COPILOT_TOKEN_DIR",
+                    os.path.expanduser("~/.config/litellm/github_copilot"),
+                )
+                token_dir = os.path.join(base_dir, auth_profile)
+            cls._authenticators[auth_profile] = Authenticator(token_dir=token_dir)
+        return cls._authenticators[auth_profile]
 
     def _get_openai_compatible_provider_info(
         self,
@@ -88,9 +104,13 @@ class GithubCopilotConfig(OpenAIConfig):
             headers, model, messages, optional_params, litellm_params, api_key, api_base
         )
 
+        # Resolve auth_profile-aware authenticator
+        auth_profile = litellm_params.get("auth_profile") if litellm_params else None
+        authenticator = self._get_authenticator(auth_profile)
+
         # Add Copilot-specific headers (editor-version, user-agent, etc.)
         try:
-            copilot_api_key = self.authenticator.get_api_key()
+            copilot_api_key = authenticator.get_api_key()
             copilot_headers = get_copilot_default_headers(copilot_api_key)
             validated_headers = {**copilot_headers, **validated_headers}
         except GetAPIKeyError:
