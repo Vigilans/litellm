@@ -628,6 +628,14 @@ class LiteLLMMessagesToCompletionTransformationHandler:
 
         completion_response = await litellm.acompletion(**completion_kwargs)
 
+        web_search_query: Optional[str] = None
+        if completion_kwargs.get("web_search_options") is not None:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    web_search_query = content if isinstance(content, str) else ""
+                    break
+
         if stream:
             transformed_stream = (
                 ANTHROPIC_ADAPTER.translate_completion_output_params_streaming(
@@ -635,6 +643,7 @@ class LiteLLMMessagesToCompletionTransformationHandler:
                     model=model,
                     tool_name_mapping=tool_name_mapping,
                     polyfill_result=polyfill_result,
+                    web_search_query=web_search_query,
                     is_async=True,
                 )
             )
@@ -646,6 +655,7 @@ class LiteLLMMessagesToCompletionTransformationHandler:
                 cast(ModelResponse, completion_response),
                 tool_name_mapping=tool_name_mapping,
                 polyfill_result=polyfill_result,
+                web_search_query=web_search_query,
             )
             if anthropic_response is not None:
                 return anthropic_response
@@ -777,6 +787,14 @@ class LiteLLMMessagesToCompletionTransformationHandler:
 
         completion_response = litellm.completion(**completion_kwargs)
 
+        web_search_query: Optional[str] = None
+        if completion_kwargs.get("web_search_options") is not None:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    web_search_query = content if isinstance(content, str) else ""
+                    break
+
         if stream:
             transformed_stream = (
                 ANTHROPIC_ADAPTER.translate_completion_output_params_streaming(
@@ -784,6 +802,7 @@ class LiteLLMMessagesToCompletionTransformationHandler:
                     model=model,
                     tool_name_mapping=tool_name_mapping,
                     polyfill_result=polyfill_result,
+                    web_search_query=web_search_query,
                     is_async=False,
                 )
             )
@@ -795,6 +814,7 @@ class LiteLLMMessagesToCompletionTransformationHandler:
                 cast(ModelResponse, completion_response),
                 tool_name_mapping=tool_name_mapping,
                 polyfill_result=polyfill_result,
+                web_search_query=web_search_query,
             )
             if anthropic_response is not None:
                 return anthropic_response

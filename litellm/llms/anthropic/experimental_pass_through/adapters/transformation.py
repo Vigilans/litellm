@@ -19,6 +19,12 @@ from litellm.llms.anthropic.experimental_pass_through.utils import (
     is_reasoning_auto_summary_enabled,
 )
 
+from litellm.llms.anthropic.experimental_pass_through.adapters.utils import (
+    build_text_blocks_with_citations,
+    build_web_search_results_from_annotations,
+    build_web_tool_use,
+)
+
 # OpenAI has a 64-character limit for function/tool names
 # Anthropic does not have this limit, so we need to truncate long names
 OPENAI_MAX_TOOL_NAME_LENGTH = 64
@@ -203,6 +209,7 @@ class AnthropicAdapter:
         response: ModelResponse,
         tool_name_mapping: Optional[Dict[str, str]] = None,
         polyfill_result: Optional[PolyfillResult] = None,
+        web_search_query: Optional[str] = None,
     ) -> Optional[AnthropicMessagesResponse]:
         """
         Translate OpenAI response to Anthropic format.
@@ -218,6 +225,7 @@ class AnthropicAdapter:
             response=response,
             tool_name_mapping=tool_name_mapping,
             polyfill_result=polyfill_result,
+            web_search_query=web_search_query,
         )
 
     def translate_completion_output_params_streaming(
@@ -226,6 +234,7 @@ class AnthropicAdapter:
         model: str,
         tool_name_mapping: Optional[Dict[str, str]] = None,
         polyfill_result: Optional[PolyfillResult] = None,
+        web_search_query: Optional[str] = None,
         is_async: bool = True,
     ) -> Union[AsyncIterator[bytes], Iterator[bytes], None]:
         """
@@ -259,6 +268,7 @@ class AnthropicAdapter:
             applied_edits=applied_edits,
             compaction_block=compaction_block,
             iterations_usage=iterations_usage,
+            web_search_query=web_search_query,
         )
         # Return the SSE-wrapped version for proper event formatting.
         if is_async:
@@ -1259,9 +1269,15 @@ class LiteLLMAnthropicMessagesAdapter:
         self,
         choices: List[Choices],
         tool_name_mapping: Optional[Dict[str, str]] = None,
+        web_search_query: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         new_content: List[Dict[str, Any]] = []
         for choice in choices:
+            # Web search: server_tool_use comes before thinking
+            if web_search_query is not None and choice.message.content is not None:
+                web_tool_use = build_web_tool_use(web_search_query)
+                new_content.append(web_tool_use)
+
             # Handle thinking blocks first
             if (
                 hasattr(choice.message, "thinking_blocks")
@@ -1307,8 +1323,14 @@ class LiteLLMAnthropicMessagesAdapter:
                     ).model_dump()
                 )
 
+            # Handle text content (web search: results + cited text after thinking)
+            if web_search_query is not None and choice.message.content is not None:
+                annotations = getattr(choice.message, "annotations", None) or []
+                result_blocks, citations = build_web_search_results_from_annotations([web_tool_use], annotations)
+                new_content.extend(result_blocks)
+                new_content.extend(build_text_blocks_with_citations(choice.message.content, citations))
             # Handle text content
-            if choice.message.content is not None:
+            elif choice.message.content is not None:
                 text_block = AnthropicResponseContentBlockText(
                     type="text", text=choice.message.content
                 ).model_dump()
@@ -1385,6 +1407,7 @@ class LiteLLMAnthropicMessagesAdapter:
         response: ModelResponse,
         tool_name_mapping: Optional[Dict[str, str]] = None,
         polyfill_result: Optional[PolyfillResult] = None,
+        web_search_query: Optional[str] = None,
     ) -> AnthropicMessagesResponse:
         """
         Translate OpenAI response to Anthropic format.
@@ -1400,6 +1423,7 @@ class LiteLLMAnthropicMessagesAdapter:
         anthropic_content = self._translate_openai_content_to_anthropic(
             choices=response.choices,  # type: ignore
             tool_name_mapping=tool_name_mapping,
+            web_search_query=web_search_query,
         )
 
         if polyfill_result is not None and polyfill_result.compaction_block is not None:
@@ -1432,6 +1456,8 @@ class LiteLLMAnthropicMessagesAdapter:
             )
         if cached_tokens > 0:
             anthropic_usage["cache_read_input_tokens"] = cached_tokens
+        if any(b.get("type") == "server_tool_use" for b in anthropic_content if isinstance(b, dict)):
+            anthropic_usage["server_tool_use"] = {"web_search_requests": 1}
 
         if polyfill_result is not None and polyfill_result.iterations_usage is not None:
             message_iteration: UsageIteration = {

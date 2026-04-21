@@ -16,6 +16,11 @@ from typing import (
 
 from litellm._logging import verbose_logger
 from litellm._uuid import uuid
+from litellm.llms.anthropic.experimental_pass_through.adapters.utils import (
+    build_text_blocks_with_citations,
+    build_web_search_results_from_annotations,
+    build_web_tool_use,
+)
 from litellm.types.llms.anthropic import (
     AppliedEdit,
     CompactionBlock,
@@ -61,6 +66,7 @@ class AnthropicStreamWrapper(AdapterCompletionStreamWrapper):
         applied_edits: Optional[List[AppliedEdit]] = None,
         compaction_block: Optional[CompactionBlock] = None,
         iterations_usage: Optional[List[UsageIteration]] = None,
+        web_search_query: Optional[str] = None,
     ):
         super().__init__(completion_stream)
         self.model = model
@@ -94,6 +100,10 @@ class AnthropicStreamWrapper(AdapterCompletionStreamWrapper):
             type="text",
             text="",
         )
+        self._web_tool_use: Optional[Dict[str, Any]] = None
+        if web_search_query is not None:
+            self._web_tool_use = build_web_tool_use(web_search_query)
+            self._accumulated_text = ""
 
     def _merge_usage_into_held_stop_reason_chunk(self, chunk: Any) -> Dict[str, Any]:
         """Merge usage data from ``chunk`` into the held ``message_delta`` chunk.
@@ -312,6 +322,36 @@ class AnthropicStreamWrapper(AdapterCompletionStreamWrapper):
                 if compaction_event is not None:
                     return compaction_event
 
+            if self.sent_content_block_start is False and self._web_tool_use is not None:
+                self.sent_content_block_start = True
+                input_data = self._web_tool_use.pop("input")
+                self.chunk_queue.append(
+                    {
+                        "type": "content_block_start",
+                        "index": self.current_content_block_index,
+                        "content_block": self._web_tool_use,
+                    }
+                )
+                self.chunk_queue.append(
+                    {
+                        "type": "content_block_delta",
+                        "index": self.current_content_block_index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": json.dumps(input_data),
+                        },
+                    }
+                )
+                self.chunk_queue.append(
+                    {
+                        "type": "content_block_stop",
+                        "index": self.current_content_block_index,
+                    }
+                )
+                self._increment_content_block_index()
+                self.sent_content_block_finish = True
+                return self.chunk_queue.popleft()
+
             if self.sent_content_block_start is False:
                 self.sent_content_block_start = True
                 self.sent_content_block_finish = False
@@ -370,6 +410,71 @@ class AnthropicStreamWrapper(AdapterCompletionStreamWrapper):
                     # behavior where the block-handling logic is gated on
                     # ``not self.queued_usage_chunk``.
                     continue
+
+                # Web search: suppress text deltas, accumulate text, emit results at finish
+                if self._web_tool_use is not None:
+                    delta = processed_chunk.get("delta", {})
+                    delta_type = delta.get("type")
+
+                    if delta_type == "text_delta":
+                        self._accumulated_text += delta.get("text", "")
+                        ann = getattr(chunk.choices[0].delta, "annotations", None)
+                        if ann:
+                            self._annotations = ann
+                        if self.chunk_queue:
+                            return self.chunk_queue.popleft()
+                        continue
+
+                    if processed_chunk["type"] == "message_delta":
+                        if not self.sent_content_block_finish:
+                            self.chunk_queue.append(
+                                {
+                                    "type": "content_block_stop",
+                                    "index": self.current_content_block_index,
+                                }
+                            )
+                        annotations = getattr(self, "_annotations", None) or []
+                        citations = self._emit_web_search_results(annotations)
+                        self._emit_cited_text_blocks(self._accumulated_text, citations)
+                        self.sent_content_block_finish = True
+                        if delta.get("stop_reason") is not None:
+                            self.holding_stop_reason_chunk = processed_chunk
+                        else:
+                            processed_chunk = self._augment_message_delta_usage(
+                                processed_chunk
+                            )
+                            self.chunk_queue.append(processed_chunk)
+                        return self.chunk_queue.popleft()
+
+                    # Non-text, non-finish content (e.g. thinking_delta):
+                    # ensure a content block is open before emitting
+                    if self.sent_content_block_finish:
+                        self._increment_content_block_index()
+                        self.chunk_queue.append(
+                            {
+                                "type": "content_block_start",
+                                "index": self.current_content_block_index,
+                                "content_block": {"type": "thinking", "thinking": ""},
+                            }
+                        )
+                        self.sent_content_block_finish = False
+                    elif should_start_new_block:
+                        self.chunk_queue.append(
+                            {
+                                "type": "content_block_stop",
+                                "index": max(self.current_content_block_index - 1, 0),
+                            }
+                        )
+                        self.chunk_queue.append(
+                            {
+                                "type": "content_block_start",
+                                "index": self.current_content_block_index,
+                                "content_block": self.current_content_block_start,
+                            }
+                        )
+                    processed_chunk["index"] = self.current_content_block_index
+                    self.chunk_queue.append(processed_chunk)
+                    return self.chunk_queue.popleft()
 
                 if should_start_new_block and not self.sent_content_block_finish:
                     # Queue the sequence: content_block_stop -> content_block_start
@@ -559,6 +664,36 @@ class AnthropicStreamWrapper(AdapterCompletionStreamWrapper):
                 if compaction_event is not None:
                     return compaction_event
 
+            if self.sent_content_block_start is False and self._web_tool_use is not None:
+                self.sent_content_block_start = True
+                input_data = self._web_tool_use.pop("input")
+                self.chunk_queue.append(
+                    {
+                        "type": "content_block_start",
+                        "index": self.current_content_block_index,
+                        "content_block": self._web_tool_use,
+                    }
+                )
+                self.chunk_queue.append(
+                    {
+                        "type": "content_block_delta",
+                        "index": self.current_content_block_index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": json.dumps(input_data),
+                        },
+                    }
+                )
+                self.chunk_queue.append(
+                    {
+                        "type": "content_block_stop",
+                        "index": self.current_content_block_index,
+                    }
+                )
+                self._increment_content_block_index()
+                self.sent_content_block_finish = True
+                return self.chunk_queue.popleft()
+
             if self.sent_content_block_start is False:
                 self.sent_content_block_start = True
                 self.sent_content_block_finish = False
@@ -608,6 +743,63 @@ class AnthropicStreamWrapper(AdapterCompletionStreamWrapper):
                     self.chunk_queue.append(merged_chunk)
                     self.queued_usage_chunk = True
                     self.holding_stop_reason_chunk = None
+                    return self.chunk_queue.popleft()
+
+                # Web search: suppress text deltas, accumulate text, emit results at finish
+                if self._web_tool_use is not None:
+                    delta = processed_chunk.get("delta", {})
+                    delta_type = delta.get("type")
+
+                    if delta_type == "text_delta":
+                        self._accumulated_text += delta.get("text", "")
+                        ann = getattr(chunk.choices[0].delta, "annotations", None)
+                        if ann:
+                            self._annotations = ann
+                        if self.chunk_queue:
+                            return self.chunk_queue.popleft()
+                        continue
+
+                    if processed_chunk["type"] == "message_delta":
+                        if not self.sent_content_block_finish:
+                            self.chunk_queue.append({
+                                "type": "content_block_stop",
+                                "index": self.current_content_block_index,
+                            })
+                        annotations = getattr(self, "_annotations", None) or []
+                        citations = self._emit_web_search_results(annotations)
+                        self._emit_cited_text_blocks(self._accumulated_text, citations)
+                        self.sent_content_block_finish = True
+                        if delta.get("stop_reason") is not None:
+                            self.holding_stop_reason_chunk = processed_chunk
+                        else:
+                            processed_chunk = self._augment_message_delta_usage(
+                                processed_chunk
+                            )
+                            self.chunk_queue.append(processed_chunk)
+                        return self.chunk_queue.popleft()
+
+                    # Non-text, non-finish content (e.g. thinking_delta):
+                    # ensure a content block is open before emitting
+                    if self.sent_content_block_finish:
+                        self._increment_content_block_index()
+                        self.chunk_queue.append({
+                            "type": "content_block_start",
+                            "index": self.current_content_block_index,
+                            "content_block": {"type": "thinking", "thinking": ""},
+                        })
+                        self.sent_content_block_finish = False
+                    elif should_start_new_block:
+                        self.chunk_queue.append({
+                            "type": "content_block_stop",
+                            "index": max(self.current_content_block_index - 1, 0),
+                        })
+                        self.chunk_queue.append({
+                            "type": "content_block_start",
+                            "index": self.current_content_block_index,
+                            "content_block": self.current_content_block_start,
+                        })
+                    processed_chunk["index"] = self.current_content_block_index
+                    self.chunk_queue.append(processed_chunk)
                     return self.chunk_queue.popleft()
 
                 # Check if this processed chunk has a stop_reason - hold it for next chunk
@@ -801,6 +993,35 @@ class AnthropicStreamWrapper(AdapterCompletionStreamWrapper):
 
     def _increment_content_block_index(self):
         self.current_content_block_index += 1
+
+    def _emit_web_search_results(self, annotations: list) -> list:
+        blocks, citations = build_web_search_results_from_annotations(
+            [self._web_tool_use], annotations
+        )
+        for block in blocks:
+            idx = self.current_content_block_index
+            self._increment_content_block_index()
+            self.chunk_queue.append(
+                {"type": "content_block_start", "index": idx, "content_block": block}
+            )
+            self.chunk_queue.append({"type": "content_block_stop", "index": idx})
+        return citations
+
+    def _emit_cited_text_blocks(self, text: str, citations: list) -> None:
+        for block_data in build_text_blocks_with_citations(text, citations):
+            idx = self.current_content_block_index
+            self._increment_content_block_index()
+            self.chunk_queue.append(
+                {"type": "content_block_start", "index": idx, "content_block": {"type": "text", "text": ""}}
+            )
+            self.chunk_queue.append(
+                {"type": "content_block_delta", "index": idx, "delta": {"type": "text_delta", "text": block_data["text"]}}
+            )
+            for cit in block_data.get("citations", []):
+                self.chunk_queue.append(
+                    {"type": "content_block_delta", "index": idx, "delta": {"type": "citations_delta", "citation": cit}}
+                )
+            self.chunk_queue.append({"type": "content_block_stop", "index": idx})
 
     def _should_start_new_content_block(self, chunk: "ModelResponseStream") -> bool:
         """
