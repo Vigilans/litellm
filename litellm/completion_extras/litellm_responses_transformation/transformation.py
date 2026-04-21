@@ -1402,11 +1402,21 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
             elif output_item.get("type") == "message":
                 # Message completion should NOT emit finish_reason
                 # This is the fix for issue #17246 - don't end stream prematurely
+                # Extract annotations from message content for web search citations
+                annotations = None
+                for content_item in output_item.get("content", []):
+                    if isinstance(content_item, dict):
+                        raw_ann = content_item.get("annotations")
+                    else:
+                        raw_ann = getattr(content_item, "annotations", None)
+                    if raw_ann:
+                        annotations = LiteLLMResponsesTransformationHandler._convert_annotations_to_chat_format(raw_ann)
+                        break
                 return ModelResponseStream(
                     choices=[
                         StreamingChoices(
                             index=0,
-                            delta=Delta(content=""),
+                            delta=Delta(content="", annotations=annotations),
                             finish_reason=None,
                         )
                     ]
