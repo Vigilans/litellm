@@ -37,7 +37,8 @@ COPY enterprise/pyproject.toml enterprise/
 COPY litellm-proxy-extras/pyproject.toml litellm-proxy-extras/
 
 # Install third-party dependencies (cached unless pyproject.toml/uv.lock change)
-RUN uv sync --frozen --no-install-project --no-install-workspace --no-default-groups --no-editable \
+RUN --mount=type=cache,target=/app/.cache/uv \
+    uv sync --frozen --no-install-project --no-install-workspace --no-default-groups --no-editable \
     --extra proxy \
     --extra proxy-runtime \
     --extra extra_proxy \
@@ -48,17 +49,20 @@ RUN uv sync --frozen --no-install-project --no-install-workspace --no-default-gr
 COPY . .
 
 # Build Admin UI before final sync
-RUN sed -i 's/\r$//' docker/build_admin_ui.sh && chmod +x docker/build_admin_ui.sh && ./docker/build_admin_ui.sh
+RUN --mount=type=cache,target=/root/.npm \
+    sed -i 's/\r$//' docker/build_admin_ui.sh && chmod +x docker/build_admin_ui.sh && ./docker/build_admin_ui.sh
 
 # Install project and workspace packages (fast - deps already cached)
-RUN uv sync --frozen --no-default-groups --no-editable \
+RUN --mount=type=cache,target=/app/.cache/uv \
+    uv sync --frozen --no-default-groups --no-editable \
     --extra proxy \
     --extra proxy-runtime \
     --extra extra_proxy \
     --extra semantic-router \
     --python python3
 
-RUN prisma generate --schema=./schema.prisma
+RUN --mount=type=cache,target=/root/.npm \
+    prisma generate --schema=./schema.prisma
 
 RUN sed -i 's/\r$//' docker/entrypoint.sh && chmod +x docker/entrypoint.sh && \
     sed -i 's/\r$//' docker/prod_entrypoint.sh && chmod +x docker/prod_entrypoint.sh
