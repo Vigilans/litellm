@@ -208,7 +208,15 @@ class LiteLLMAnthropicToResponsesAPIAdapter:
                     web_tool["filters"] = {"allowed_domains": allowed}
                 result.append(web_tool)
                 continue
-            func_tool: Dict[str, Any] = {"type": "function", "name": tool_name}
+            # strict defaults to True on the OpenAI Responses API side, which
+            # forces every property into `required`. Anthropic input_schema
+            # treats fields outside `required` as optional, so opt out of
+            # strict to preserve those semantics.
+            func_tool: Dict[str, Any] = {
+                "type": "function",
+                "name": tool_name,
+                "strict": False,
+            }
             if "description" in tool_dict:
                 func_tool["description"] = tool_dict["description"]
             if "input_schema" in tool_dict:
