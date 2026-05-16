@@ -67,6 +67,7 @@ from litellm.utils import (
     get_optional_params,
     peek_reasoning_summary_aliases,
     strip_reasoning_summary_aliases_from_optional_params,
+    drop_incompatible_temperature_for_reasoning,
 )
 
 # Logging is imported lazily when needed to avoid loading litellm_logging at import time
@@ -1664,6 +1665,11 @@ def completion(  # type: ignore # noqa: PLR0915
         force_reasoning_effort = litellm_params.get("force_reasoning_effort")
         if force_reasoning_effort:
             optional_params["reasoning_effort"] = force_reasoning_effort
+            if OpenAIGPT5Config.is_model_gpt_5_model(model) or \
+               litellm.AzureOpenAIGPT5Config.is_model_gpt_5_model(model):
+                optional_params = drop_incompatible_temperature_for_reasoning(
+                    optional_params
+                )
 
         cast(LiteLLMLoggingObj, logging).update_environment_variables(
             model=model,

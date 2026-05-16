@@ -17,6 +17,7 @@ from litellm.types.llms.openai import *
 from litellm.types.responses.main import *
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.utils import LlmProviders
+from litellm.utils import drop_incompatible_temperature_for_reasoning
 
 from ..common_utils import OpenAIError
 
@@ -133,6 +134,13 @@ class OpenAIResponsesAPIConfig(BaseResponsesAPIConfig):
         Chat Completions strips these in
         `remove_cache_control_flag_from_messages_and_tools`; mirror that here.
         """
+
+        if litellm_params.get("force_reasoning_effort"):
+            response_api_optional_request_params = (
+                drop_incompatible_temperature_for_reasoning(
+                    response_api_optional_request_params
+                )
+            )
 
         input = self._validate_input_param(input)
         tools = response_api_optional_request_params.get("tools")

@@ -9729,6 +9729,25 @@ def strip_reasoning_summary_aliases_from_optional_params(
     return op, rs_val
 
 
+def drop_incompatible_temperature_for_reasoning(
+    optional_params: dict,
+) -> dict:
+    """Copy optional_params; drop temperature != 1 when reasoning is active.
+
+    GPT-5 backends reject the combination.
+    """
+    effort = optional_params.get("reasoning_effort")
+    if not effort:
+        reasoning = optional_params.get("reasoning")
+        effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
+    if not effort:
+        return optional_params
+    temperature = optional_params.get("temperature")
+    if temperature is None or temperature == 1:
+        return optional_params
+    return {k: v for k, v in optional_params.items() if k != "temperature"}
+
+
 def get_non_default_transcription_params(kwargs: dict) -> dict:
     from litellm.constants import OPENAI_TRANSCRIPTION_PARAMS
 
