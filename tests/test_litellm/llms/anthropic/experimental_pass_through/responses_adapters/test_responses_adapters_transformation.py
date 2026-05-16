@@ -519,6 +519,7 @@ class TestTranslateToolsToResponsesAPI:
             {
                 "type": "function",
                 "name": "get_weather",
+                "strict": False,
                 "description": "Get current weather for a city.",
                 "parameters": {
                     "type": "object",
@@ -527,6 +528,31 @@ class TestTranslateToolsToResponsesAPI:
                 },
             }
         ]
+
+    def test_strict_defaults_to_false(self):
+        """Anthropic input_schema treats fields outside `required` as optional.
+
+        OpenAI Responses API defaults `strict` to True, which would force every
+        property into `required`. Translator must emit strict=False to preserve
+        the optional/required distinction.
+        """
+        tools = [
+            {
+                "name": "search",
+                "description": "Run a search.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                },
+            }
+        ]
+        result = _ADAPTER.translate_tools_to_responses_api(tools)  # type: ignore[arg-type]
+        assert result[0]["strict"] is False
+        assert result[0]["parameters"]["required"] == ["query"]
 
     def test_tool_without_description(self):
         """Tool without a description omits the description key."""
