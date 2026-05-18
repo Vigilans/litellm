@@ -7583,11 +7583,13 @@ export const teamPermissionsUpdateCall = async (accessToken: string, teamId: str
 /**
  * Get all spend logs for a particular session
  */
-export const sessionSpendLogsCall = async (accessToken: string, session_id: string) => {
+export const sessionSpendLogsCall = async (accessToken: string, session_id: string, page_size?: number) => {
   try {
+    const params = new URLSearchParams({ session_id });
+    if (page_size != null) params.set("page_size", String(page_size));
     let url = proxyBaseUrl
-      ? `${proxyBaseUrl}/spend/logs/session/ui?session_id=${encodeURIComponent(session_id)}`
-      : `/spend/logs/session/ui?session_id=${encodeURIComponent(session_id)}`;
+      ? `${proxyBaseUrl}/spend/logs/session/ui?${params.toString()}`
+      : `/spend/logs/session/ui?${params.toString()}`;
 
     const response = await fetch(url, {
       method: "GET",

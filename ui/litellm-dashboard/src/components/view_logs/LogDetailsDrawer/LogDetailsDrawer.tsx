@@ -121,7 +121,7 @@ export function LogDetailsDrawer({
     queryKey: ["sessionLogs", sessionId],
     queryFn: async () => {
       if (!sessionId || !accessToken) return [];
-      const response = await sessionSpendLogsCall(accessToken, sessionId);
+      const response = await sessionSpendLogsCall(accessToken, sessionId, logEntry?.session_total_count);
       const allSessionLogs: LogEntry[] = response.data || response || [];
       return allSessionLogs
         .map((row) => ({
@@ -180,8 +180,9 @@ export function LogDetailsDrawer({
     onSelectLog: (selected) => {
       if (isSessionMode) {
         setSelectedSessionRequestId(selected.request_id);
+      } else {
+        onSelectLog?.(selected);
       }
-      onSelectLog?.(selected);
     },
   });
 
@@ -358,10 +359,7 @@ export function LogDetailsDrawer({
                           <TraceEventRow
                             row={row}
                             isSelected={row.request_id === currentLog.request_id}
-                            onClick={() => {
-                              setSelectedSessionRequestId(row.request_id);
-                              onSelectLog?.(row);
-                            }}
+                            onClick={() => setSelectedSessionRequestId(row.request_id)}
                           />
                         </div>
                       );

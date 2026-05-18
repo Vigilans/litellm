@@ -453,3 +453,64 @@ describe("teamInfoCall", () => {
     expect(parsed.searchParams.has("team_id")).toBe(false);
   });
 });
+
+describe("sessionSpendLogsCall", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("should append page_size query param when provided", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ data: [] }),
+    } as any);
+    global.fetch = mockFetch as any;
+
+    await Networking.sessionSpendLogsCall("token", "sess-1", 227);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url] = mockFetch.mock.calls[0];
+    const parsed = typeof url === "string" ? new URL(url, "http://example.com") : new URL((url as Request).url);
+    expect(parsed.pathname).toContain("/spend/logs/session/ui");
+    expect(parsed.searchParams.get("session_id")).toBe("sess-1");
+    expect(parsed.searchParams.get("page_size")).toBe("227");
+  });
+
+  it("should omit page_size when not provided (defer to backend default)", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ data: [] }),
+    } as any);
+    global.fetch = mockFetch as any;
+
+    await Networking.sessionSpendLogsCall("token", "sess-1");
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url] = mockFetch.mock.calls[0];
+    const parsed = typeof url === "string" ? new URL(url, "http://example.com") : new URL((url as Request).url);
+    expect(parsed.searchParams.get("session_id")).toBe("sess-1");
+    expect(parsed.searchParams.has("page_size")).toBe(false);
+  });
+
+  it("should URL-encode session_id with special characters", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ data: [] }),
+    } as any);
+    global.fetch = mockFetch as any;
+
+    const sessionId = "session with spaces & special?chars";
+    await Networking.sessionSpendLogsCall("token", sessionId, 10);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url] = mockFetch.mock.calls[0];
+    const parsed = typeof url === "string" ? new URL(url, "http://example.com") : new URL((url as Request).url);
+    expect(parsed.searchParams.get("session_id")).toBe(sessionId);
+  });
+});
