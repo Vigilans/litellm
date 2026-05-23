@@ -104,9 +104,10 @@ def _build_responses_kwargs(
             from litellm.types.utils import CallTypes
 
             if isinstance(value, LiteLLMLoggingObject):
-                # Reclassify as acompletion so the success handler doesn't try to
-                # validate the Responses API event as an AnthropicResponse.
-                # (Mirrors the pattern used in LiteLLMMessagesToCompletionTransformationHandler.)
+                # Keep call_type as anthropic_messages so logging attributes
+                # the request to /v1/messages correctly.
+                # _handle_anthropic_messages_response_logging has guards for
+                # ResponsesAPIResponse / ResponseCompletedEvent types.
                 setattr(value, "call_type", CallTypes.anthropic_messages.value)
             responses_kwargs[key] = value
         elif key not in excluded and key not in responses_kwargs and value is not None:
