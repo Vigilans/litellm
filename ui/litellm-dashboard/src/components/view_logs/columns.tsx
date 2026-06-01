@@ -1,13 +1,28 @@
 import { getSpendString } from "@/utils/dataUtils";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { ColumnDef, Row } from "@tanstack/react-table";
 import { Badge, Button } from "@tremor/react";
 import { Tooltip } from "antd";
 import React, { useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { getProviderLogoAndName } from "../provider_info_helpers";
 import { TableHeaderSortDropdown } from "../common_components/TableHeaderSortDropdown/TableHeaderSortDropdown";
 import { TimeCell } from "./time_cell";
 import { AGENT_CALL_TYPES, MCP_CALL_TYPES } from "./constants";
 import { AgentBadge, AgentIcon, LlmBadge, McpBadge, SparkleIcon, WrenchIcon } from "./TypeBadges";
+
+function ExpanderButton<T>({ row, ariaPrefix = "row" }: { row: Row<T>; ariaPrefix?: string }) {
+  if (!row.getCanExpand()) return null;
+  const expanded = row.getIsExpanded();
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); row.getToggleExpandedHandler()(); }}
+      className="w-5 h-5 flex items-center justify-center focus:outline-none"
+      aria-label={expanded ? `Collapse ${ariaPrefix}` : `Expand ${ariaPrefix}`}
+    >
+      <ChevronRight size={14} className={`transition-transform ${expanded ? "rotate-90" : ""}`} />
+    </button>
+  );
+}
 
 /** API sort field mapping for /spend/logs/ui endpoint */
 export const LOGS_SORT_FIELD_MAP = {
@@ -106,6 +121,12 @@ const SortableHeader = ({
 );
 
 export const createColumns = (sortProps?: LogsSortProps): ColumnDef<LogEntry>[] => [
+  {
+    id: "expander",
+    header: () => null,
+    size: 28,
+    cell: ({ row }) => <ExpanderButton row={row} ariaPrefix="session" />,
+  },
   {
     header: sortProps
       ? () => (

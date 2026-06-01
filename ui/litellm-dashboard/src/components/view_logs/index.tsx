@@ -174,32 +174,56 @@ export default function SpendLogsTable({ accessToken, token, userRole, userID, p
       }
     }
 
-    return (
-      searchedLogs
-        .map((log) => {
-          const sessionComposition = log.session_id ? sessionCompositionById[log.session_id] : undefined;
-          return {
-            ...log,
-            request_duration_ms: log.request_duration_ms,
-            session_llm_count: sessionComposition?.llm ?? undefined,
-            session_mcp_count: sessionComposition?.mcp ?? undefined,
-            session_agent_count: sessionComposition?.agent ?? undefined,
-            onKeyHashClick: (keyHash: string) => setSelectedKeyIdInfoView(keyHash),
-            onSessionClick: (sessionId: string) => {
-              if (sessionId) {
-                setSelectedSessionId(sessionId);
-                setSelectedLog(log);
-                setIsDrawerOpen(true);
-              }
-            },
-          };
-        })
-        // Deduplicate multi-call sessions using the pre-built map (O(1) per row).
-        .filter((log) => {
-          if (!log.session_id || (log.session_total_count || 1) <= 1) return true;
-          return sessionRepresentativeMap.get(log.session_id)?.requestId === log.request_id;
-        })
-    );
+    // Enrich rows with session composition + click handlers, while partitioning
+    // multi-call sessions into one representative parent row plus child rows
+    // (children pre-sorted by startTime ASC, ready to attach as TanStack sub-rows).
+    type EnrichedLog = (typeof searchedLogs)[number] & {
+      session_llm_count?: number;
+      session_mcp_count?: number;
+      session_agent_count?: number;
+      onKeyHashClick: (keyHash: string) => void;
+      onSessionClick: (sessionId: string) => void;
+    };
+    const enrich = (log: (typeof searchedLogs)[number]): EnrichedLog => {
+      const sessionComposition = log.session_id ? sessionCompositionById[log.session_id] : undefined;
+      return {
+        ...log,
+        session_llm_count: sessionComposition?.llm,
+        session_mcp_count: sessionComposition?.mcp,
+        session_agent_count: sessionComposition?.agent,
+        onKeyHashClick: (keyHash: string) => setSelectedKeyIdInfoView(keyHash),
+        onSessionClick: (sessionId: string) => {
+          if (sessionId) {
+            setSelectedSessionId(sessionId);
+            setSelectedLog(log);
+            setIsDrawerOpen(true);
+          }
+        },
+      };
+    };
+
+    const parents: EnrichedLog[] = [];
+    const sessionChildRows = new Map<string, EnrichedLog[]>();
+    for (const log of searchedLogs) {
+      const enriched = enrich(log);
+      const isMultiCall = log.session_id && (log.session_total_count || 1) > 1;
+      const isRep = isMultiCall && sessionRepresentativeMap.get(log.session_id!)?.requestId === log.request_id;
+      if (!isMultiCall || isRep) {
+        parents.push(enriched);
+      } else {
+        const arr = sessionChildRows.get(log.session_id!);
+        if (arr) arr.push(enriched);
+        else sessionChildRows.set(log.session_id!, [enriched]);
+      }
+    }
+    for (const arr of sessionChildRows.values()) {
+      arr.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    }
+
+    return parents.map((log) => ({
+      ...log,
+      subRows: log.session_id ? sessionChildRows.get(log.session_id) : undefined,
+    }));
   }, [filteredLogs.data, searchTerm]);
 
   // Keep the Fetch button busy until the table has actually committed the new
@@ -289,6 +313,8 @@ export default function SpendLogsTable({ accessToken, token, userRole, userID, p
                     data={deferredData}
                     onRowClick={handleRowClick}
                     isLoading={isLogsLoading}
+                    getSubRows={(row: any) => row.subRows}
+                    initialExpanded={true}
                   />
                 </div>
               </>
