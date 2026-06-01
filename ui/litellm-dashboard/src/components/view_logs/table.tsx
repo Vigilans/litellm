@@ -1,5 +1,5 @@
 import { Fragment, useState } from "react";
-import { ColumnDef, flexRender, getCoreRowModel, getExpandedRowModel, Row, useReactTable, getSortedRowModel, SortingState } from "@tanstack/react-table";
+import { ColumnDef, ExpandedState, flexRender, getCoreRowModel, getExpandedRowModel, Row, useReactTable, getSortedRowModel, SortingState } from "@tanstack/react-table";
 
 import { Table, TableHead, TableHeaderCell, TableBody, TableRow, TableCell } from "@tremor/react";
 
@@ -12,12 +12,24 @@ interface DataTableProps<TData, TValue> {
   /** Renders directly in tbody as sibling table rows (used by MCP children) */
   renderChildRows?: (props: { row: Row<TData> }) => React.ReactNode;
   getRowCanExpand?: (row: Row<TData>) => boolean;
+  /** Extract sub-rows from a parent row (TanStack native sub-row model) */
+  getSubRows?: (row: TData) => TData[] | undefined;
   isLoading?: boolean;
   loadingMessage?: string;
   noDataMessage?: string;
   /** Enable client-side column sorting (defaults to false to avoid conflicts with server-side sorting) */
   enableSorting?: boolean;
+  /** Initial expansion state (passes through to TanStack initialState.expanded). */
+  initialExpanded?: ExpandedState;
 }
+
+// TanStack Table's default column size is 150. Columns that declare a smaller
+// `size` are treated as narrow and get tight width + reduced horizontal padding.
+const DEFAULT_COL_SIZE = 150;
+const narrowColumnStyle = (size?: number): React.CSSProperties | undefined =>
+  size != null && size < DEFAULT_COL_SIZE
+    ? { width: size, maxWidth: size, paddingLeft: 8, paddingRight: 0 }
+    : undefined;
 
 export function DataTable<TData, TValue>({
   data = [],
@@ -26,12 +38,14 @@ export function DataTable<TData, TValue>({
   renderSubComponent,
   renderChildRows,
   getRowCanExpand,
+  getSubRows,
   isLoading = false,
   loadingMessage = "🚅 Loading logs...",
   noDataMessage = "No logs found",
   enableSorting = false,
+  initialExpanded,
 }: DataTableProps<TData, TValue>) {
-  const supportsExpansion = !!(renderSubComponent || renderChildRows) && !!getRowCanExpand;
+  const supportsExpansion = !!((renderSubComponent || renderChildRows) && getRowCanExpand) || !!getSubRows;
   const [sorting, setSorting] = useState<SortingState>([]);
 
   const table = useReactTable<TData>({
@@ -44,7 +58,9 @@ export function DataTable<TData, TValue>({
       onSortingChange: setSorting,
       enableSortingRemoval: false,
     }),
-    ...(supportsExpansion && { getRowCanExpand }),
+    ...(supportsExpansion && getRowCanExpand && { getRowCanExpand }),
+    ...(getSubRows && { getSubRows }),
+    ...(supportsExpansion && initialExpanded !== undefined && { initialState: { expanded: initialExpanded } }),
     getRowId: (row: TData, index: number) => {
       const _row: any = row as any;
       return _row?.request_id ?? String(index);
@@ -65,9 +81,10 @@ export function DataTable<TData, TValue>({
                 const isSorted = header.column.getIsSorted();
                 
                 return (
-                  <TableHeaderCell 
-                    key={header.id} 
+                  <TableHeaderCell
+                    key={header.id}
                     className={`py-1 h-8 ${canSort ? 'cursor-pointer select-none hover:bg-gray-50' : ''}`}
+                    style={narrowColumnStyle(header.column.columnDef.size)}
                     onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
                   >
                     {header.isPlaceholder ? null : (
@@ -99,11 +116,15 @@ export function DataTable<TData, TValue>({
             table.getRowModel().rows.map((row) => (
               <Fragment key={row.id}>
                 <TableRow
-                  className={`h-8 ${onRowClick ? "cursor-pointer hover:bg-gray-50" : ""}`}
+                  className={`h-8 ${row.depth > 0 ? "bg-blue-50/30" : ""} ${onRowClick ? "cursor-pointer hover:bg-gray-50" : ""}`}
                   onClick={() => onRowClick?.(row.original)}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id} className="py-0.5 max-h-8 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <TableCell
+                      key={cell.id}
+                      className="py-0.5 max-h-8 overflow-hidden text-ellipsis whitespace-nowrap"
+                      style={narrowColumnStyle(cell.column.columnDef.size)}
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
                   ))}
