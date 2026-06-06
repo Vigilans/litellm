@@ -18146,6 +18146,10 @@
         "supports_parallel_function_calling": true,
         "supports_reasoning": true,
         "supports_minimal_reasoning_effort": true,
+        "supports_low_reasoning_effort": true,
+        "supports_high_reasoning_effort": true,
+        "supports_xhigh_reasoning_effort": true,
+        "supports_max_reasoning_effort": true,
         "supports_vision": true
     },
     "github_copilot/claude-opus-4.8": {
@@ -18161,7 +18165,11 @@
         "supports_parallel_function_calling": true,
         "supports_reasoning": true,
         "supports_vision": true,
-        "supports_minimal_reasoning_effort": true
+        "supports_minimal_reasoning_effort": true,
+        "supports_low_reasoning_effort": true,
+        "supports_high_reasoning_effort": true,
+        "supports_xhigh_reasoning_effort": true,
+        "supports_max_reasoning_effort": true
     },
     "github_copilot/claude-opus-41": {
         "litellm_provider": "github_copilot",
@@ -18198,6 +18206,26 @@
         ],
         "supports_function_calling": true,
         "supports_parallel_function_calling": true,
+        "supports_vision": true
+    },
+    "github_copilot/claude-sonnet-4.6": {
+        "litellm_provider": "github_copilot",
+        "max_input_tokens": 200000,
+        "max_output_tokens": 32000,
+        "max_tokens": 32000,
+        "mode": "chat",
+        "supported_endpoints": [
+            "/v1/chat/completions",
+            "/v1/messages"
+        ],
+        "supports_function_calling": true,
+        "supports_parallel_function_calling": true,
+        "supports_response_schema": true,
+        "supports_reasoning": true,
+        "supports_minimal_reasoning_effort": true,
+        "supports_low_reasoning_effort": true,
+        "supports_high_reasoning_effort": true,
+        "supports_max_reasoning_effort": true,
         "supports_vision": true
     },
     "github_copilot/gemini-2.5-pro": {

@@ -18132,7 +18132,11 @@
         "supports_parallel_function_calling": true,
         "supports_response_schema": true,
         "supports_reasoning": true,
-        "supports_minimal_reasoning_effort": true
+        "supports_minimal_reasoning_effort": true,
+        "supports_low_reasoning_effort": true,
+        "supports_high_reasoning_effort": true,
+        "supports_xhigh_reasoning_effort": true,
+        "supports_max_reasoning_effort": true
     },
     "github_copilot/claude-opus-4.8": {
         "litellm_provider": "github_copilot",
@@ -18147,7 +18151,11 @@
         "supports_parallel_function_calling": true,
         "supports_reasoning": true,
         "supports_vision": true,
-        "supports_minimal_reasoning_effort": true
+        "supports_minimal_reasoning_effort": true,
+        "supports_low_reasoning_effort": true,
+        "supports_high_reasoning_effort": true,
+        "supports_xhigh_reasoning_effort": true,
+        "supports_max_reasoning_effort": true
     },
     "github_copilot/claude-opus-41": {
         "litellm_provider": "github_copilot",
@@ -18201,7 +18209,11 @@
         "supports_function_calling": true,
         "supports_parallel_function_calling": true,
         "supports_response_schema": true,
-        "supports_reasoning": true
+        "supports_reasoning": true,
+        "supports_minimal_reasoning_effort": true,
+        "supports_low_reasoning_effort": true,
+        "supports_high_reasoning_effort": true,
+        "supports_max_reasoning_effort": true
     },
     "github_copilot/gemini-2.5-pro": {
         "litellm_provider": "github_copilot",
