@@ -9203,6 +9203,12 @@ class ProviderConfigManager:
             )
 
             return get_dashscope_image_generation_config(model)
+        elif LlmProviders.CHATGPT == provider:
+            from litellm.llms.chatgpt.image_generation import (
+                get_chatgpt_image_generation_config,
+            )
+
+            return get_chatgpt_image_generation_config(model)
         return None
 
     @staticmethod
