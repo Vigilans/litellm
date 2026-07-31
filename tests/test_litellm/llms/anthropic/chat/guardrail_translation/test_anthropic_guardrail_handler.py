@@ -7,7 +7,7 @@ with guardrail transformations, specifically testing edge cases with empty choic
 
 import os
 import sys
-from typing import Any, List, Literal, Optional
+from typing import Any, Literal, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -55,6 +55,30 @@ class MockDynamicGuardrail(CustomGuardrail):
             request_data
         )
         return inputs
+
+
+class MockMaskingGuardrail(CustomGuardrail):
+    """Capture request inputs and mask one known prohibited value."""
+
+    def __init__(self, skip_system_message_in_guardrail: Optional[bool] = True):
+        super().__init__(guardrail_name="masking-test")
+        self.skip_system_message_in_guardrail = skip_system_message_in_guardrail
+        self.inputs: Optional[GenericGuardrailAPIInputs] = None
+
+    async def apply_guardrail(
+        self,
+        inputs: GenericGuardrailAPIInputs,
+        request_data: dict,
+        input_type: Literal["request", "response"],
+        logging_obj: Optional[Any] = None,
+    ) -> GenericGuardrailAPIInputs:
+        self.inputs = inputs.copy()
+        masked_inputs = inputs.copy()
+        masked_inputs["texts"] = [
+            "[MASKED]" if text == "prohibited correction" else text
+            for text in inputs.get("texts", [])
+        ]
+        return masked_inputs
 
 
 class TestAnthropicMessagesHandlerStreamingOutputProcessing:
@@ -117,6 +141,113 @@ class TestAnthropicMessagesHandlerInputProcessing:
 
         assert data.get("litellm_metadata", {}).get("guardrails")
         assert guardrail.dynamic_params == {"policy_id": "policy-123"}
+
+    @pytest.mark.asyncio
+    async def test_midturn_system_correction_is_guardrailed_when_top_level_system_is_skipped(
+        self,
+    ):
+        handler = AnthropicMessagesHandler()
+        guardrail = MockMaskingGuardrail()
+        data = {
+            "model": "claude-3-5-sonnet-20241022",
+            "system": "trusted top-level system prompt",
+            "messages": [
+                {"role": "user", "content": "safe text"},
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "unsupported", "text": "discarded text"},
+                        {"type": "text", "text": "prohibited correction"},
+                    ],
+                },
+            ],
+        }
+
+        await handler.process_input_messages(data=data, guardrail_to_apply=guardrail)
+
+        assert guardrail.inputs is not None
+        assert guardrail.inputs["texts"] == ["safe text", "prohibited correction"]
+        assert "trusted top-level system prompt" not in guardrail.inputs["texts"]
+        assert data["messages"][1]["content"][0]["text"] == "discarded text"
+        assert data["messages"][1]["content"][1]["text"] == "[MASKED]"
+
+    @pytest.mark.asyncio
+    async def test_string_midturn_system_correction_is_guardrailed(self):
+        handler = AnthropicMessagesHandler()
+        guardrail = MockMaskingGuardrail()
+        data = {
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "system", "content": "prohibited correction"}],
+        }
+
+        await handler.process_input_messages(data=data, guardrail_to_apply=guardrail)
+
+        assert guardrail.inputs is not None
+        assert guardrail.inputs["texts"] == ["prohibited correction"]
+        assert data["messages"][0]["content"] == "[MASKED]"
+
+    @pytest.mark.asyncio
+    async def test_unsupported_midturn_system_content_is_not_guardrailed(self):
+        handler = AnthropicMessagesHandler()
+        guardrail = MockMaskingGuardrail()
+        data = {
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": [{"type": "image", "source": {"type": "url"}}],
+                }
+            ],
+        }
+
+        await handler.process_input_messages(data=data, guardrail_to_apply=guardrail)
+
+        assert guardrail.inputs is None
+
+    @pytest.mark.asyncio
+    async def test_skip_system_message_excludes_only_hoisted_top_level_system(self):
+        handler = AnthropicMessagesHandler()
+        guardrail = MockMaskingGuardrail()
+        data = {
+            "model": "claude-3-5-sonnet-20241022",
+            "system": "trusted top-level system prompt",
+            "messages": [
+                {"role": "user", "content": "safe text"},
+                {"role": "system", "content": "prohibited correction"},
+                {"role": "user", "content": "continue"},
+            ],
+        }
+
+        await handler.process_input_messages(data=data, guardrail_to_apply=guardrail)
+
+        assert guardrail.inputs is not None
+        structured = guardrail.inputs["structured_messages"]
+        assert [m["role"] for m in structured] == ["user", "system", "user"]
+        assert structured[1]["content"] == "prohibited correction"
+
+    @pytest.mark.asyncio
+    async def test_default_skip_false_scans_midturn_system_and_hoists_top_level_system(
+        self,
+    ):
+        handler = AnthropicMessagesHandler()
+        guardrail = MockMaskingGuardrail(skip_system_message_in_guardrail=None)
+        data = {
+            "model": "claude-3-5-sonnet-20241022",
+            "system": "trusted top-level system prompt",
+            "messages": [
+                {"role": "user", "content": "safe text"},
+                {"role": "system", "content": "prohibited correction"},
+            ],
+        }
+
+        await handler.process_input_messages(data=data, guardrail_to_apply=guardrail)
+
+        assert guardrail.inputs is not None
+        assert guardrail.inputs["texts"] == ["safe text", "prohibited correction"]
+        structured = guardrail.inputs["structured_messages"]
+        assert [m["role"] for m in structured] == ["system", "user", "system"]
+        assert structured[0]["content"] == "trusted top-level system prompt"
+        assert data["messages"][1]["content"] == "[MASKED]"
 
     @pytest.mark.asyncio
     async def test_process_output_streaming_response_empty_choices(self):

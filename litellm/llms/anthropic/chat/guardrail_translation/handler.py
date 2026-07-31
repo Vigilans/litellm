@@ -24,7 +24,6 @@ from litellm.llms.base_llm.guardrail_translation.base_translation import BaseTra
 from litellm.llms.base_llm.guardrail_translation.utils import (
     effective_skip_system_message_for_guardrail,
     effective_skip_tool_message_for_guardrail,
-    openai_messages_without_system,
     openai_messages_without_tool,
 )
 from litellm.proxy.pass_through_endpoints.llm_provider_handlers.anthropic_passthrough_logging_handler import (
@@ -56,14 +55,9 @@ if TYPE_CHECKING:
 
 
 class AnthropicMessagesHandler(BaseTranslation):
-    """
-    Handler for processing Anthropic messages with guardrails.
+    """Process Anthropic messages with guardrails.
 
-    This class provides methods to:
-    1. Process input messages (pre-call hook)
-    2. Process output responses (post-call hook)
-
-    Methods can be overridden to customize behavior for different message formats.
+    In-sequence system entries are untrusted client input and are scanned by guardrails.
     """
 
     def __init__(self):
@@ -112,14 +106,22 @@ class AnthropicMessagesHandler(BaseTranslation):
         skip_system = effective_skip_system_message_for_guardrail(guardrail_to_apply)
         skip_tool = effective_skip_tool_message_for_guardrail(guardrail_to_apply)
 
-        chat_completion_compatible_request = self._translate_to_openai(data)
+        # Exclude only the trusted top-level prompt. In-sequence system entries are untrusted
+        # and must stay aligned with texts_to_check for positional masking. When the top-level
+        # prompt is included, the pre-existing count mismatch disables positional masking.
+        translation_source = {  # mutable-ok: API message payload
+            key: value for key, value in data.items() if key != "system"
+        }  # mutable-ok: API message payload
+        chat_completion_compatible_request = self._translate_to_openai(translation_source)
 
         structured_messages = cast(
             List[AllMessageValues],
             chat_completion_compatible_request.get("messages", []),
         )
-        if skip_system:
-            structured_messages = openai_messages_without_system(structured_messages)
+        if not skip_system:
+            hoisted_system_message = self._hoisted_top_level_system_message(data)
+            if hoisted_system_message is not None:
+                structured_messages.insert(0, hoisted_system_message)
         if skip_tool:
             structured_messages = openai_messages_without_tool(structured_messages)
 
@@ -188,6 +190,46 @@ class AnthropicMessagesHandler(BaseTranslation):
 
         return data
 
+    def _hoisted_top_level_system_message(
+        self, data: dict
+    ) -> AllMessageValues | None:  # mutable-ok: API message payload
+        """Return the system message produced by translating the top-level prompt."""
+        system = data.get("system")
+        if not system:
+            return None
+        probe = self._translate_to_openai(
+            {  # mutable-ok: API message payload
+                "model": data.get("model") or "",
+                "messages": [],  # mutable-ok: API message payload
+                "system": system,
+            }
+        )
+        hoisted = probe.get("messages") or []  # mutable-ok: API message payload
+        return hoisted[0] if hoisted else None
+
+    @staticmethod
+    def _extract_midturn_system_text(
+        message: dict[str, Any],  # mutable-ok: API message payload
+        msg_idx: int,
+        texts_to_check: list[str],  # mutable-ok: API message payload
+        task_mappings: list[tuple[int, int | None]],  # mutable-ok: API message payload
+    ) -> None:
+        content = message.get("content")
+        if isinstance(content, str):
+            if content:
+                texts_to_check.append(content)
+                task_mappings.append((msg_idx, None))
+            return
+        if not isinstance(content, list):
+            return
+        for content_idx, content_item in enumerate(content):
+            if not isinstance(content_item, dict) or content_item.get("type") != "text":
+                continue
+            text_str = content_item.get("text")
+            if isinstance(text_str, str) and text_str:
+                texts_to_check.append(text_str)
+                task_mappings.append((msg_idx, content_idx))
+
     def extract_request_tool_names(self, data: dict) -> List[str]:
         """Extract tool names from Anthropic messages request (tools[].name)."""
         names: List[str] = []
@@ -206,15 +248,18 @@ class AnthropicMessagesHandler(BaseTranslation):
         skip_system_message: bool = False,
         skip_tool_message: bool = False,
     ) -> None:
-        """
-        Extract text content and images from a message.
-
-        Override this method to customize text/image extraction logic.
-        """
-        role = str(message.get("role") or "").lower()
-        if skip_system_message and role == "system":
+        """Extract text content and images from a message."""
+        role = str(message.get("role") or "")
+        if role == "system":
+            # Match the adapter's filtering so positional guardrail write-back stays aligned.
+            self._extract_midturn_system_text(
+                message=message,
+                msg_idx=msg_idx,
+                texts_to_check=texts_to_check,
+                task_mappings=task_mappings,
+            )
             return
-        if skip_tool_message and role == "tool":
+        if skip_tool_message and role.lower() == "tool":
             return
 
         content = message.get("content", None)
