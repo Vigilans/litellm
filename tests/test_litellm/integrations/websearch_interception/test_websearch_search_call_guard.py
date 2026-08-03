@@ -50,7 +50,7 @@ async def test_client_request_is_still_rewritten(handler):
     )
 
     assert result is not None
-    assert result["tools"][0]["name"] == "litellm_web_search"
+    assert result["tools"][0]["function"]["name"] == "litellm_web_search"
 
 
 @pytest.mark.asyncio
@@ -59,6 +59,24 @@ async def test_search_call_tool_is_left_alone(handler):
     try:
         result = await handler.async_pre_call_deployment_hook(
             dict(WEB_SEARCH_REQUEST), "aresponses"
+        )
+    finally:
+        is_web_search_call.reset(token)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_messages_pre_request_hook_leaves_search_call_alone(handler):
+    token = is_web_search_call.set(True)
+    try:
+        result = await handler.async_pre_request_hook(
+            model="claude-opus-5",
+            messages=[{"role": "user", "content": "q"}],
+            kwargs={
+                "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+                "litellm_params": {"custom_llm_provider": "github_copilot"},
+            },
         )
     finally:
         is_web_search_call.reset(token)

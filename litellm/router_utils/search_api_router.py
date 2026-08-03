@@ -11,6 +11,7 @@ from functools import partial
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from litellm._logging import verbose_router_logger
+from litellm.types.utils import SearchProvidersSet
 
 
 class SearchAPIRouter:
@@ -235,8 +236,23 @@ class SearchAPIRouter:
 
             from litellm.search._context import search_router
 
+            model_backed_search = (
+                search_provider not in SearchProvidersSet
+                and search_provider in router_instance.get_model_names()
+            )
+            if model_backed_search:
+                kwargs["_model_search_num_retries"] = litellm_params.get(
+                    "max_retries", router_instance.num_retries
+                )
+                kwargs["num_retries"] = 0
+            if (
+                kwargs.get("timeout") is None
+                and litellm_params.get("timeout") is not None
+            ):
+                kwargs["timeout"] = litellm_params["timeout"]
+
             # Bind the Router handling this call so independent Router instances
-            # resolve model-backed providers against their own model groups.
+            # resolve and execute model-backed providers on that same Router.
             token = search_router.set(router_instance)
             try:
                 return await original_generic_function(
@@ -245,6 +261,10 @@ class SearchAPIRouter:
                     api_base=api_base,
                     **kwargs,
                 )
+            except Exception as e:
+                if model_backed_search:
+                    e.num_retries = 0  # type: ignore[attr-defined]
+                raise
             finally:
                 search_router.reset(token)
 

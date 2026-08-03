@@ -467,6 +467,9 @@ class WebSearchInterceptionLogger(CustomLogger):
         Returns:
             Modified kwargs dict with converted tools, or None if no modifications needed
         """
+        if is_web_search_call.get():
+            return None
+
         # Check if this request is for an enabled provider
         custom_llm_provider = kwargs.get("litellm_params", {}).get(
             "custom_llm_provider", ""

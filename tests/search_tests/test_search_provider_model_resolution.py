@@ -31,7 +31,11 @@ def router_with_llm_search_models():
         search_tools=[
             {
                 "search_tool_name": "llm-search",
-                "litellm_params": {"search_provider": "gpt-5.6-luna"},
+                "litellm_params": {
+                    "search_provider": "gpt-5.6-luna",
+                    "timeout": 12,
+                    "max_retries": 4,
+                },
             },
             {
                 "search_tool_name": "perplexity",
@@ -108,6 +112,31 @@ async def test_enum_provider_wins_over_same_named_deployment(
 
 
 @pytest.mark.asyncio
+async def test_enum_provider_keeps_outer_retry_ownership(
+    router_with_llm_search_models, monkeypatch
+):
+    from litellm.llms.base_llm.search.transformation import SearchResponse
+
+    async def fake_asearch(*, search_provider, **kwargs):
+        assert search_provider == "perplexity"
+        assert kwargs["litellm_metadata"]["max_retries"] == 3
+        assert "_model_search_num_retries" not in kwargs
+        return SearchResponse(results=[])
+
+    router_with_llm_search_models.asearch = (
+        router_with_llm_search_models.factory_function(
+            fake_asearch, call_type="asearch"
+        )
+    )
+
+    response = await router_with_llm_search_models.asearch(
+        query="test", search_tool_name="perplexity", num_retries=3
+    )
+
+    assert response.results == []
+
+
+@pytest.mark.asyncio
 async def test_router_supplies_model_resolution_context(
     router_with_llm_search_models, monkeypatch
 ):
@@ -116,6 +145,9 @@ async def test_router_supplies_model_resolution_context(
     async def fake_asearch(*, search_provider, **kwargs):
         assert search_router.get() is router_with_llm_search_models
         assert _resolve_search_provider_as_model(search_provider) == search_provider
+        assert kwargs["num_retries"] == 0
+        assert kwargs["_model_search_num_retries"] == 4
+        assert kwargs["timeout"] == 12
         return SearchResponse(results=[])
 
     monkeypatch.setattr(router_with_llm_search_models, "num_retries", 0)
@@ -131,6 +163,33 @@ async def test_router_supplies_model_resolution_context(
 
     assert response.results == []
     assert search_router.get() is None
+
+
+@pytest.mark.asyncio
+async def test_model_search_defaults_inner_retries_to_router(
+    router_with_llm_search_models, monkeypatch
+):
+    from litellm.llms.base_llm.search.transformation import SearchResponse
+
+    router_with_llm_search_models.search_tools[0]["litellm_params"].pop("max_retries")
+    router_with_llm_search_models.num_retries = 3
+
+    async def fake_asearch(*, search_provider, **kwargs):
+        assert kwargs["num_retries"] == 0
+        assert kwargs["_model_search_num_retries"] == 3
+        return SearchResponse(results=[])
+
+    router_with_llm_search_models.asearch = (
+        router_with_llm_search_models.factory_function(
+            fake_asearch, call_type="asearch"
+        )
+    )
+
+    response = await router_with_llm_search_models.asearch(
+        query="test", search_tool_name="llm-search"
+    )
+
+    assert response.results == []
 
 
 @pytest.mark.asyncio

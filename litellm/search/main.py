@@ -15,6 +15,7 @@ from litellm.constants import request_timeout
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.base_llm.search.transformation import BaseSearchConfig, SearchResponse
 from litellm.llms.custom_httpx.llm_http_handler import BaseLLMHTTPHandler
+from litellm.search.model_adapter import execute_model_search
 from litellm.types.utils import SearchProviders, SearchProvidersSet
 from litellm.utils import ProviderConfigManager, client, filter_out_litellm_params
 
@@ -254,6 +255,8 @@ def search(
 
         verbose_logger.debug(f"Search call - provider: {search_provider}")
 
+        model_search_num_retries = kwargs.pop("_model_search_num_retries", None)
+
         # Build optional_params from explicit parameters
         optional_params = _build_search_optional_params(
             max_results=max_results,
@@ -336,9 +339,23 @@ def search(
                 custom_llm_provider=search_provider,
             )
 
-            raise NotImplementedError(
-                f"Search provider '{search_provider}' resolves to model "
-                f"'{search_model}', but LLM search backends are not implemented yet"
+            if not _is_async:
+                raise ValueError(
+                    f"Search provider '{search_provider}' resolves to model "
+                    f"'{search_model}', which is only supported by litellm.asearch()"
+                )
+            if not isinstance(query, str):
+                raise ValueError(
+                    f"Search provider '{search_provider}' resolves to model "
+                    f"'{search_model}', which only accepts a string query"
+                )
+            return execute_model_search(
+                query=query,
+                model=search_model,
+                timeout=timeout,
+                optional_params=optional_params,
+                request_kwargs=kwargs,
+                num_retries=model_search_num_retries,
             )
     except Exception as e:
         model_name = f"{search_provider}/search"
