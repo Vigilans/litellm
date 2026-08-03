@@ -50,7 +50,7 @@ async def test_client_request_is_still_rewritten(handler):
     )
 
     assert result is not None
-    assert result["tools"][0]["function"]["name"] == "litellm_web_search"
+    assert result["tools"][0]["name"] == "litellm_web_search"
 
 
 @pytest.mark.asyncio

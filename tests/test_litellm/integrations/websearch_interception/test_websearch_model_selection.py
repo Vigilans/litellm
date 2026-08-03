@@ -138,7 +138,7 @@ async def test_deployment_hook_honours_the_per_deployment_override():
     )
 
     assert result is not None
-    assert result["tools"][0]["function"]["name"] == "litellm_web_search"
+    assert result["tools"][0]["name"] == "litellm_web_search"
 
 
 @pytest.mark.asyncio
@@ -238,6 +238,37 @@ def test_capability_lookup_reads_the_registry_directly(model, supports, monkeypa
         )
         is supports
     )
+
+
+@pytest.mark.asyncio
+async def test_rewritten_tool_matches_the_endpoint_shape():
+    """
+    The Responses API keeps name and parameters at the top level. A nested
+    Chat Completions tool is dropped as malformed, so the model is left unable
+    to search and answers that it has no web access.
+
+    The call type arrives as a ``CallTypes`` member, whose ``str()`` is
+    ``"CallTypes.aresponses"`` rather than ``"aresponses"``.
+    """
+    from litellm.types.utils import CallTypes
+
+    handler = WebSearchInterceptionLogger(enabled_providers=["github_copilot"])
+    request = {
+        "model": NON_SEARCHING_MODEL,
+        "custom_llm_provider": "github_copilot",
+        "tools": [{"type": "web_search"}],
+    }
+
+    responses_result = await handler.async_pre_call_deployment_hook(
+        dict(request), CallTypes.aresponses
+    )
+    assert responses_result["tools"][0]["name"] == "litellm_web_search"
+    assert "function" not in responses_result["tools"][0]
+
+    chat_result = await handler.async_pre_call_deployment_hook(
+        dict(request), CallTypes.acompletion
+    )
+    assert chat_result["tools"][0]["function"]["name"] == "litellm_web_search"
 
 
 def test_capability_lookup_matches_supports_web_search():

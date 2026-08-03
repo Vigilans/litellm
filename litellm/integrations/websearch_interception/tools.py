@@ -82,6 +82,39 @@ def get_litellm_web_search_tool_openai() -> Dict[str, Any]:
     }
 
 
+def get_litellm_web_search_tool_responses() -> Dict[str, Any]:
+    """
+    Get the standard LiteLLM web search tool definition in Responses format.
+
+    The Responses API keeps ``name`` and ``parameters`` at the top level rather
+    than nesting them under ``function``. A nested one is dropped as malformed,
+    leaving the model with no way to search.
+
+    Example:
+        >>> tool = get_litellm_web_search_tool_responses()
+        >>> tool['name']
+        'litellm_web_search'
+    """
+    return {
+        "type": "function",
+        "name": LITELLM_WEB_SEARCH_TOOL_NAME,
+        "description": (
+            "Search the web for information. Use this when you need current "
+            "information or answers to questions that require up-to-date data."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to execute",
+                }
+            },
+            "required": ["query"],
+        },
+    }
+
+
 def is_web_search_tool_chat_completion(tool: Dict[str, Any]) -> bool:
     """
     Check if a tool is a web search tool for Chat Completions API (strict check).
