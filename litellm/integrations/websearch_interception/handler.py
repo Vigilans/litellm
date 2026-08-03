@@ -66,6 +66,7 @@ class WebSearchInterceptionLogger(CustomLogger):
         self,
         enabled_providers: Optional[List[Union[LlmProviders, str]]] = None,
         search_tool_name: Optional[str] = None,
+        skip_models_with_web_search: bool = False,
     ):
         """
         Args:
@@ -75,6 +76,9 @@ class WebSearchInterceptionLogger(CustomLogger):
                               Default: None (all providers enabled)
             search_tool_name: Name of search tool configured in router's search_tools.
                              If None, will attempt to use first available search tool.
+            skip_models_with_web_search: Leave models that support web search to
+                             search on their own. A deployment can opt back in
+                             with ``force_websearch_interception``.
         """
         super().__init__()
         # Convert enum values to strings for comparison
@@ -85,7 +89,86 @@ class WebSearchInterceptionLogger(CustomLogger):
                 p.value if isinstance(p, LlmProviders) else p for p in enabled_providers
             ]
         self.search_tool_name = search_tool_name
+        self.skip_models_with_web_search = skip_models_with_web_search
         self._request_has_websearch = False  # Track if current request has web search
+
+    def _model_supports_web_search(
+        self, model: str, custom_llm_provider: Optional[str]
+    ) -> bool:
+        """
+        Look the capability up in the model registry.
+
+        ``litellm.supports_web_search`` resolves the provider first, and for
+        GitHub Copilot that resolution authenticates, which blocks on an
+        interactive device-code prompt when no token is cached. The gates run
+        on every request, so the lookup has to stay inert.
+        """
+        from litellm.utils import _get_model_cost_key, _supports_provider_info_factory
+
+        candidates = [model]
+        if custom_llm_provider:
+            candidates.insert(0, f"{custom_llm_provider}/{model}")
+        if "/" in model:
+            candidates.append(model.split("/", 1)[1])
+
+        for candidate in candidates:
+            key = _get_model_cost_key(candidate)
+            if key is None:
+                continue
+            supports = (litellm.model_cost.get(key) or {}).get("supports_web_search")
+            if supports is not None:
+                return bool(supports)
+
+        return (
+            _supports_provider_info_factory(
+                model, custom_llm_provider, "supports_web_search"
+            )
+            is True
+        )
+
+    def _should_intercept_model(
+        self,
+        model: str,
+        custom_llm_provider: Optional[str],
+        kwargs: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Decide whether this model's searches should be executed for it.
+
+        Only ``model`` and ``custom_llm_provider`` are required, because the
+        Anthropic pass-through gates run before a deployment is selected and
+        have nothing else to go on. Where a deployment is known, the router has
+        spread its ``litellm_params`` over ``kwargs``.
+        """
+        if custom_llm_provider not in self.enabled_providers:
+            return False
+
+        if self._deployment_forces_interception(kwargs):
+            return True
+
+        if not self.skip_models_with_web_search:
+            return True
+
+        return not self._model_supports_web_search(
+            model=model, custom_llm_provider=custom_llm_provider
+        )
+
+    @staticmethod
+    def _deployment_forces_interception(kwargs: Optional[Dict[str, Any]]) -> bool:
+        """
+        Read ``force_websearch_interception`` off the selected deployment.
+
+        The router spreads a deployment's ``litellm_params`` over the top level
+        of the call kwargs, so that is where the flag arrives; the nested dict
+        is checked too for callers that pass one through.
+        """
+        if not kwargs:
+            return False
+        if kwargs.get("force_websearch_interception"):
+            return True
+        return bool(
+            (kwargs.get("litellm_params") or {}).get("force_websearch_interception")
+        )
 
     async def try_short_circuit_search(
         self,
@@ -122,9 +205,8 @@ class WebSearchInterceptionLogger(CustomLogger):
 
         # Check if provider is in enabled list
         provider_str = custom_llm_provider or ""
-        if (
-            self.enabled_providers is not None
-            and provider_str not in self.enabled_providers
+        if not self._should_intercept_model(
+            model=model, custom_llm_provider=provider_str
         ):
             return None
 
@@ -257,7 +339,11 @@ class WebSearchInterceptionLogger(CustomLogger):
                 )
             except Exception:
                 custom_llm_provider = ""
-        if custom_llm_provider not in self.enabled_providers:
+        if not self._should_intercept_model(
+            model=kwargs.get("model", ""),
+            custom_llm_provider=custom_llm_provider,
+            kwargs=kwargs,
+        ):
             return None
 
         # Check if request has tools with native web_search
@@ -336,6 +422,9 @@ class WebSearchInterceptionLogger(CustomLogger):
         # Extract parameters from config
         enabled_providers_str = config.get("enabled_providers", None)
         search_tool_name = config.get("search_tool_name", None)
+        skip_models_with_web_search = bool(
+            config.get("skip_models_with_web_search", False)
+        )
 
         # Convert string provider names to LlmProviders enum values
         enabled_providers: Optional[List[Union[LlmProviders, str]]] = None
@@ -353,6 +442,7 @@ class WebSearchInterceptionLogger(CustomLogger):
         return cls(
             enabled_providers=enabled_providers,
             search_tool_name=search_tool_name,
+            skip_models_with_web_search=skip_models_with_web_search,
         )
 
     async def async_pre_request_hook(
@@ -383,9 +473,10 @@ class WebSearchInterceptionLogger(CustomLogger):
             f" - enabled_providers={self.enabled_providers or 'ALL'}"
         )
 
-        if (
-            self.enabled_providers is not None
-            and custom_llm_provider not in self.enabled_providers
+        if not self._should_intercept_model(
+            model=model,
+            custom_llm_provider=custom_llm_provider,
+            kwargs=kwargs,
         ):
             verbose_logger.debug(
                 f"WebSearchInterception: Skipping - provider {custom_llm_provider} not in {self.enabled_providers}"
@@ -470,9 +561,10 @@ class WebSearchInterceptionLogger(CustomLogger):
         # Check if provider should be intercepted
         # Note: custom_llm_provider is already normalized by get_llm_provider()
         # (e.g., "bedrock/invoke/..." -> "bedrock")
-        if (
-            self.enabled_providers is not None
-            and custom_llm_provider not in self.enabled_providers
+        if not self._should_intercept_model(
+            model=model,
+            custom_llm_provider=custom_llm_provider,
+            kwargs=kwargs,
         ):
             verbose_logger.debug(
                 f"WebSearchInterception: Skipping provider {custom_llm_provider} (not in enabled list: {self.enabled_providers})"
@@ -574,9 +666,10 @@ class WebSearchInterceptionLogger(CustomLogger):
             return False, {}
 
         # Check if provider should be intercepted
-        if (
-            self.enabled_providers is not None
-            and custom_llm_provider not in self.enabled_providers
+        if not self._should_intercept_model(
+            model=model,
+            custom_llm_provider=custom_llm_provider,
+            kwargs=kwargs,
         ):
             verbose_logger.debug(
                 f"WebSearchInterception: Skipping provider {custom_llm_provider} (not in enabled list: {self.enabled_providers})"
