@@ -608,14 +608,16 @@ class TestTranslateToolChoiceToResponsesAPI:
     """Anthropic tool_choice -> Responses API tool_choice."""
 
     def test_auto_maps_to_auto(self):
-        assert _ADAPTER.translate_tool_choice_to_responses_api({"type": "auto"}) == {
-            "type": "auto"
-        }
+        assert (
+            _ADAPTER.translate_tool_choice_to_responses_api({"type": "auto"})
+            == "auto"
+        )
 
     def test_any_maps_to_required(self):
-        assert _ADAPTER.translate_tool_choice_to_responses_api({"type": "any"}) == {
-            "type": "required"
-        }
+        assert (
+            _ADAPTER.translate_tool_choice_to_responses_api({"type": "any"})
+            == "required"
+        )
 
     def test_specific_tool_maps_to_function(self):
         result = _ADAPTER.translate_tool_choice_to_responses_api(
@@ -623,9 +625,9 @@ class TestTranslateToolChoiceToResponsesAPI:
         )
         assert result == {"type": "function", "name": "get_weather"}
 
-    def test_unknown_type_defaults_to_auto(self):
+    def test_none_maps_to_none(self):
         result = _ADAPTER.translate_tool_choice_to_responses_api({"type": "none"})
-        assert result == {"type": "auto"}
+        assert result == "none"
 
 
 # ---------------------------------------------------------------------------
@@ -803,6 +805,14 @@ class TestTranslateRequestBroaderCoverage:
         )
         kwargs = _ADAPTER.translate_request(req)
         assert kwargs["tool_choice"] == {"type": "function", "name": "do_thing"}
+
+    def test_auto_tool_choice_uses_responses_scalar_format(self):
+        req = _make_request(
+            tools=[{"name": "do_thing"}],
+            tool_choice={"type": "auto"},
+        )
+        kwargs = _ADAPTER.translate_request(req)
+        assert kwargs["tool_choice"] == "auto"
 
     def test_thinking_translated_to_reasoning(self):
         req = _make_request(thinking={"type": "enabled", "budget_tokens": 12000})
