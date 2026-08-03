@@ -85,6 +85,34 @@ class TestIsAnthropicNativeWebSearchTool:
         assert not is_anthropic_native_web_search_tool({"name": "web_search"})
 
 
+class TestHostedWebSearchToolShapes:
+    """Every hosted web search shape a client can send must be intercepted."""
+
+    def test_matches_anthropic_dated_variant(self):
+        assert is_web_search_tool({"type": "web_search_20250305", "name": "web_search"})
+
+    def test_matches_responses_bare_type(self):
+        assert is_web_search_tool({"type": "web_search"})
+
+    def test_matches_responses_tool_with_unknown_options(self):
+        # Real capture. external_web_access postdates the pinned SDK and
+        # search_content_types belongs to the preview tool's schema, so the
+        # option set a client sends cannot be part of the identity check.
+        assert is_web_search_tool(
+            {
+                "type": "web_search",
+                "external_web_access": True,
+                "search_content_types": ["text", "image"],
+            }
+        )
+
+    def test_matches_responses_preview_type(self):
+        assert is_web_search_tool({"type": "web_search_preview"})
+
+    def test_non_string_type_is_not_a_match(self):
+        assert not is_web_search_tool({"type": {"nested": "shape"}})
+
+
 class TestLegacyWebSearchNameGate:
     """The bare ``WebSearch`` name is a legacy interception marker. Real
     client-side ``WebSearch`` tools (Cowork, Claude Desktop) carry an

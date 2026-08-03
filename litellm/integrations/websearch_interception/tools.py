@@ -155,6 +155,7 @@ def is_web_search_tool(tool: Dict[str, Any]) -> bool:
     - LiteLLM standard: name == "litellm_web_search"
     - OpenAI format: type == "function" with function.name == "litellm_web_search"
     - Anthropic native: type starts with "web_search_" (e.g., "web_search_20250305")
+    - Responses hosted: type == "web_search"
     - Claude Code: name == "web_search" with a type field
     - Custom: name == "WebSearch" (legacy interception marker — only matched
       when input_schema is absent; see note below)
@@ -186,6 +187,8 @@ def is_web_search_tool(tool: Dict[str, Any]) -> bool:
         True
         >>> is_web_search_tool({"type": "web_search_20250305", "name": "web_search"})
         True
+        >>> is_web_search_tool({"type": "web_search"})  # Responses hosted tool
+        True
         >>> is_web_search_tool({"name": "calculator"})
         False
         >>> is_web_search_tool({"name": "WebSearch"})  # legacy interception marker
@@ -208,7 +211,11 @@ def is_web_search_tool(tool: Dict[str, Any]) -> bool:
         return True
 
     # Check for native Anthropic web_search_* types
-    if tool_type.startswith("web_search_"):
+    if isinstance(tool_type, str) and tool_type.startswith("web_search_"):
+        return True
+
+    # Check for the Responses hosted tool
+    if tool_type == "web_search":
         return True
 
     # Check for Claude Code's web_search with a type field
