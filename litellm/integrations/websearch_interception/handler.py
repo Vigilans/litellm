@@ -21,6 +21,7 @@ from litellm.integrations.custom_logger import CustomLogger
 from litellm.integrations.websearch_interception.tools import (
     get_litellm_web_search_tool,
     get_litellm_web_search_tool_openai,
+    get_litellm_web_search_tool_responses,
     is_anthropic_native_web_search_tool,
     is_web_search_tool,
     is_web_search_tool_chat_completion,
@@ -304,12 +305,16 @@ class WebSearchInterceptionLogger(CustomLogger):
             kwargs[WEBSEARCH_EMIT_NATIVE_BLOCKS_KEY] = True
 
         # Convert native/custom web_search tools to LiteLLM standard
+        replacement = (
+            get_litellm_web_search_tool_responses()
+            if getattr(call_type, "value", call_type) in ("aresponses", "responses")
+            else get_litellm_web_search_tool_openai()
+        )
         converted_tools = []
         for tool in tools:
             if is_web_search_tool(tool):
                 # Convert to LiteLLM standard web search tool
-                converted_tool = get_litellm_web_search_tool_openai()
-                converted_tools.append(converted_tool)
+                converted_tools.append(replacement)
                 verbose_logger.debug(
                     f"WebSearchInterception: Converted {tool.get('name', 'unknown')} "
                     f"(type={tool.get('type', 'none')}) to {LITELLM_WEB_SEARCH_TOOL_NAME}"

@@ -203,6 +203,7 @@ async def test_messages_pre_request_hook_matches_selected_router_model_name():
     )
 
     assert result is not None
+    assert result["tools"][0]["name"] == "litellm_web_search"
 
 
 @pytest.mark.asyncio
@@ -368,6 +369,35 @@ async def test_provider_and_model_filters_are_both_required():
     )
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_rewritten_tool_matches_the_endpoint_shape():
+    from litellm.types.utils import CallTypes
+
+    handler = WebSearchInterceptionLogger(
+        enabled_providers=["github_copilot"], enabled_models=["*-max"]
+    )
+    request = {
+        "model": "github_copilot/claude-opus-5",
+        "custom_llm_provider": "github_copilot",
+        "tools": [{"type": "web_search"}],
+        "litellm_metadata": {"deployment_model_name": "claude-opus-5-max"},
+    }
+
+    for call_type in (CallTypes.aresponses, CallTypes.responses):
+        responses_result = await handler.async_pre_call_deployment_hook(
+            dict(request), call_type
+        )
+        assert responses_result is not None
+        assert responses_result["tools"][0]["name"] == "litellm_web_search"
+        assert "function" not in responses_result["tools"][0]
+
+    chat_result = await handler.async_pre_call_deployment_hook(
+        dict(request), CallTypes.acompletion
+    )
+    assert chat_result is not None
+    assert chat_result["tools"][0]["function"]["name"] == "litellm_web_search"
 
 
 @pytest.mark.asyncio
