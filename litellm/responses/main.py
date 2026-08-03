@@ -32,6 +32,9 @@ from litellm.litellm_core_utils.prompt_templates.common_utils import (
 )
 from litellm.llms.base_llm.responses.transformation import BaseResponsesAPIConfig
 from litellm.llms.custom_httpx.llm_http_handler import BaseLLMHTTPHandler
+from litellm.responses.anthropic_messages_transformation.handler import (
+    LiteLLMResponsesToMessagesAPIHandler,
+)
 from litellm.responses.litellm_completion_transformation.handler import (
     LiteLLMCompletionTransformationHandler,
 )
@@ -667,6 +670,40 @@ def _pop_use_chat_completions_api_kw(kwargs: Dict[str, Any]) -> bool:
     return bool(use_cc)
 
 
+def _should_route_responses_to_anthropic_messages(
+    model: str,
+    custom_llm_provider: Optional[str],
+    responses_api_provider_config: Optional[BaseResponsesAPIConfig],
+    use_chat_completions_api: bool,
+    is_async: bool,
+) -> bool:
+    """
+    Claude models reached over ``/v1/responses`` have no native Responses config,
+    so they otherwise fall through to the chat/completions bridge. Their provider
+    does serve ``/v1/messages`` natively, which preserves thinking signatures,
+    custom/namespace tools, and reasoning effort that the chat shape cannot carry.
+
+    ``/v1/messages`` has no sync transport, so sync callers keep the chat bridge.
+    """
+    if not is_async:
+        return False
+    if responses_api_provider_config is not None or use_chat_completions_api:
+        return False
+    if litellm.use_chat_completions_url_for_anthropic_responses:
+        return False
+    if custom_llm_provider is None or custom_llm_provider not in {
+        provider.value for provider in litellm.LlmProviders
+    }:
+        return False
+    return (
+        ProviderConfigManager.get_provider_anthropic_messages_config(
+            model=model,
+            provider=litellm.LlmProviders(custom_llm_provider),
+        )
+        is not None
+    )
+
+
 def _resolve_model_provider_for_responses(
     model: str,
     custom_llm_provider: Optional[str],
@@ -1115,6 +1152,26 @@ def responses(
             return _file_search_dispatch
 
         if responses_api_provider_config is None or use_chat_completions_api is True:
+            if _should_route_responses_to_anthropic_messages(
+                model=model,
+                custom_llm_provider=custom_llm_provider,
+                responses_api_provider_config=responses_api_provider_config,
+                use_chat_completions_api=use_chat_completions_api,
+                is_async=_is_async,
+            ):
+                return LiteLLMResponsesToMessagesAPIHandler.response_api_handler(
+                    model=model,
+                    input=input,
+                    responses_api_request=response_api_optional_params,
+                    custom_llm_provider=custom_llm_provider,
+                    _is_async=_is_async,
+                    stream=stream,
+                    extra_headers=extra_headers,
+                    extra_body=extra_body,
+                    timeout=timeout if timeout is not None else request_timeout,
+                    **kwargs,
+                )
+
             return litellm_completion_transformation_handler.response_api_handler(
                 model=model,
                 input=input,

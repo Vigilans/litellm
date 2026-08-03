@@ -1,0 +1,474 @@
+{
+  "text": {
+    "verbosity": "low"
+  },
+  "input": [
+    {
+      "role": "developer",
+      "type": "additional_tools",
+      "tools": [
+        {
+          "name": "exec",
+          "type": "custom",
+          "format": {
+            "type": "grammar",
+            "syntax": "lark",
+            "definition": "\nstart: pragma_source | plain_source\npragma_source: PRAGMA_LINE NEWLINE SOURCE\nplain_source: SOURCE\n\nPRAGMA_LINE: /[ \\t]*\\/\\/ @exec:[^\\r\\n]*/\nNEWLINE: /\\r?\\n/\nSOURCE: /[\\s\\S]+/\n"
+          },
+          "description": "Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in a fresh V8 isolate as ..."
+        },
+        {
+          "name": "wait",
+          "type": "function",
+          "strict": false,
+          "parameters": {
+            "type": "object",
+            "required": [
+              "cell_id"
+            ],
+            "properties": {
+              "cell_id": {
+                "type": "string",
+                "description": "Identifier of the running exec cell."
+              },
+              "terminate": {
+                "type": "boolean",
+                "description": "True stops the running exec cell; false or omitted waits for output."
+              },
+              "max_tokens": {
+                "type": "number",
+                "description": "Output token budget for this wait call. Defaults to 10000 tokens."
+              },
+              "yield_time_ms": {
+                "type": "number",
+                "description": "Wait before yielding more output. Defaults to 10000 ms."
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exec` returns `Script runn..."
+        },
+        {
+          "name": "request_user_input",
+          "type": "function",
+          "strict": false,
+          "parameters": {
+            "type": "object",
+            "required": [
+              "questions"
+            ],
+            "properties": {
+              "questions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "header",
+                    "question",
+                    "options"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Stable identifier for mapping answers (snake_case)."
+                    },
+                    "header": {
+                      "type": "string",
+                      "description": "Short header label shown in the UI (12 or fewer chars)."
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "label",
+                          "description"
+                        ],
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "description": "User-facing label (1-5 words)."
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "One short sentence explaining impact/tradeoff if selected."
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "description": "Provide 2-3 mutually exclusive choices. Put the recommended option first and suffix its label with \"(Recommended)\". Do not include an \"Other\" option in this list; the client will add a free-form \"Other\" option automatically."
+                    },
+                    "question": {
+                      "type": "string",
+                      "description": "Single-sentence prompt shown to the user."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "description": "Questions to show the user. Prefer 1 and do not exceed 3"
+              },
+              "autoResolutionMs": {
+                "type": "number",
+                "description": "Optional auto-resolution window in milliseconds, from 60000 to 240000. Include this only when the question is useful but non-blocking and continuing with best judgment is acceptable if the user does not answer; omit it when explicit user input is required before continuing. Use 60000 for lightly helpful context and up to 240000 when the answer would materially unblock better work."
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Request user input for one to three short questions and wait for the response. Set autoResolutionMs, from 60000 to 24000..."
+        },
+        {
+          "name": "collaboration",
+          "type": "namespace",
+          "tools": [
+            {
+              "name": "followup_task",
+              "type": "function",
+              "strict": false,
+              "parameters": {
+                "type": "object",
+                "required": [
+                  "target",
+                  "message"
+                ],
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "description": "Agent id or canonical task name to send a follow-up task to (from spawn_agent)."
+                  },
+                  "message": {
+                    "type": "string",
+                    "encrypted": true,
+                    "description": "Message text to send to the target agent."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "Send a follow-up task to an existing non-root target agent and trigger a turn if it is idle. If the target is already ru..."
+            },
+            {
+              "name": "interrupt_agent",
+              "type": "function",
+              "strict": false,
+              "parameters": {
+                "type": "object",
+                "required": [
+                  "target"
+                ],
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "description": "Agent id or canonical task name to interrupt (from spawn_agent)."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "Interrupt an agent's current turn, if any, and return its previous status. The agent remains available for messages and ..."
+            },
+            {
+              "name": "list_agents",
+              "type": "function",
+              "strict": false,
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path_prefix": {
+                    "type": "string",
+                    "description": "Task-path prefix filter without a trailing slash. Omit to list all live agents."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "List live agents in the current root thread tree. Optionally filter by task-path prefix."
+            },
+            {
+              "name": "send_message",
+              "type": "function",
+              "strict": false,
+              "parameters": {
+                "type": "object",
+                "required": [
+                  "target",
+                  "message"
+                ],
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "description": "Relative or canonical task name to message (from spawn_agent)."
+                  },
+                  "message": {
+                    "type": "string",
+                    "encrypted": true,
+                    "description": "Message text to queue on the target agent."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "Send a message to an existing agent. The message will be delivered promptly. Does not trigger a new turn."
+            },
+            {
+              "name": "spawn_agent",
+              "type": "function",
+              "strict": false,
+              "parameters": {
+                "type": "object",
+                "required": [
+                  "task_name",
+                  "message"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Model override for the new agent. Omit unless an explicit override is needed."
+                  },
+                  "message": {
+                    "type": "string",
+                    "encrypted": true,
+                    "description": "Initial plain-text task for the new agent."
+                  },
+                  "task_name": {
+                    "type": "string",
+                    "description": "Task name for the new agent. Use lowercase letters, digits, and underscores."
+                  },
+                  "fork_turns": {
+                    "type": "string",
+                    "description": "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns."
+                  },
+                  "reasoning_effort": {
+                    "type": "string",
+                    "description": "Reasoning effort override for the new agent. Omit to inherit the parent effort."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "         Available model overrides (optional; inherited parent model is preferred): - `gpt-5.6-sol`:  Reasoning efforts:..."
+            },
+            {
+              "name": "wait_agent",
+              "type": "function",
+              "strict": false,
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "timeout_ms": {
+                    "type": "number",
+                    "description": "Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "Wait for a mailbox update from any live agent, including queued messages and final-status notifications. The wait also e..."
+            }
+          ],
+          "description": "Tools for spawning and managing sub-agents."
+        }
+      ]
+    },
+    {
+      "role": "developer",
+      "type": "message",
+      "content": [
+        {
+          "text": "You are Codex, an agent based on GPT-5. You and the user share one workspace, an...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "developer",
+      "type": "message",
+      "content": [
+        {
+          "text": "<permissions instructions> Filesystem sandboxing defines which files can be read...",
+          "type": "input_text"
+        },
+        {
+          "text": "<collaboration_mode># Collaboration Mode: Default  You are now in Default mode. ...",
+          "type": "input_text"
+        },
+        {
+          "text": "<skills_instructions> ## Skills A skill is a set of instructions provided throug...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "developer",
+      "type": "message",
+      "content": [
+        {
+          "text": "You are `/root`, the primary agent in a team of agents collaborating to fulfill ...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "developer",
+      "type": "message",
+      "content": [
+        {
+          "text": "<multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegat...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "type": "message",
+      "content": [
+        {
+          "text": "# AGENTS.md instructions for /home/vigilans/Library/dotfiles/profiles/agents/dot...",
+          "type": "input_text"
+        },
+        {
+          "text": "<environment_context>   <cwd>/home/vigilans/Library/dotfiles/profiles/agents/dot...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "type": "message",
+      "content": [
+        {
+          "text": "你好",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "developer",
+      "type": "message",
+      "content": [
+        {
+          "text": "<model_switch> The user was previously using a different model. Please continue ...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "type": "message",
+      "content": [
+        {
+          "text": "你好",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "type": "reasoning",
+      "content": null,
+      "summary": [
+        {
+          "text": "The user sent \"你好你好\" which means \"Hello hello\" in Chinese. This is just a casual greeting, not a task or request. I should respond warmly and briefly in the same tone/language, and perhaps ask what they'd like to work on.\n\nThis is a simple greeting, no tools needed. I'll respond directly in the final channel.",
+          "type": "summary_text"
+        }
+      ],
+      "encrypted_content": null
+    },
+    {
+      "role": "assistant",
+      "type": "message",
+      "content": [
+        {
+          "text": "你好你好！有什么我可以帮你的吗？",
+          "type": "output_text"
+        }
+      ]
+    },
+    {
+      "role": "developer",
+      "type": "message",
+      "content": [
+        {
+          "text": "<model_switch> The user was previously using a different model. Please continue ...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "type": "message",
+      "content": [
+        {
+          "text": "你好",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "developer",
+      "type": "message",
+      "content": [
+        {
+          "text": "<model_switch> The user was previously using a different model. Please continue ...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "type": "message",
+      "content": [
+        {
+          "text": "你好",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "developer",
+      "type": "message",
+      "content": [
+        {
+          "text": "<model_switch> The user was previously using a different model. Please continue ...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "type": "message",
+      "content": [
+        {
+          "text": "你好",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "developer",
+      "type": "message",
+      "content": [
+        {
+          "text": "<model_switch> The user was previously using a different model. Please continue ...",
+          "type": "input_text"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "type": "message",
+      "content": [
+        {
+          "text": "你好",
+          "type": "input_text"
+        }
+      ]
+    }
+  ],
+  "model": "claude-opus-5",
+  "store": false,
+  "stream": true,
+  "include": [
+    "reasoning.encrypted_content"
+  ],
+  "reasoning": {
+    "effort": "max",
+    "context": "all_turns"
+  },
+  "tool_choice": "auto",
+  "prompt_cache_key": "019f9c54-8846-7a41-95c6-029dbdc83881",
+  "parallel_tool_calls": false
+}

@@ -1899,29 +1899,45 @@ def client(original_function):  # noqa: PLR0915
             result = await original_function(*args, **kwargs)
             end_time = datetime.datetime.now()
 
+            from litellm.responses.streaming_iterator import (
+                BaseResponsesAPIStreamingIterator,
+            )
+
+            is_responses_stream_result = isinstance(
+                result, BaseResponsesAPIStreamingIterator
+            )
+            if is_responses_stream_result and logging_obj.stream is not True:
+                logging_obj.stream = True
+                logging_obj.model_call_details["stream"] = True
             if _is_streaming_request(
                 kwargs=kwargs,
                 call_type=call_type,
-            ):
+            ) or is_responses_stream_result:
+                _update_response_metadata(
+                    result=result,
+                    logging_obj=logging_obj,
+                    model=model,
+                    kwargs=kwargs,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
                 if (
                     "complete_response" in kwargs
                     and kwargs["complete_response"] is True
                 ):
+                    if is_responses_stream_result:
+                        async for _ in result:
+                            pass
+                        completed = getattr(result, "completed_response", None)
+                        return getattr(completed, "response", completed)
+
                     chunks = []
-                    for idx, chunk in enumerate(result):
+                    for chunk in result:
                         chunks.append(chunk)
                     return litellm.stream_chunk_builder(
                         chunks, messages=kwargs.get("messages", None)
                     )
                 else:
-                    _update_response_metadata(
-                        result=result,
-                        logging_obj=logging_obj,
-                        model=model,
-                        kwargs=kwargs,
-                        start_time=start_time,
-                        end_time=end_time,
-                    )
                     return result
             elif call_type == CallTypes.arealtime.value:
                 return result

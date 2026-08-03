@@ -225,6 +225,12 @@ use_chat_completions_url_for_anthropic_messages: bool = bool(
 route_all_chat_openai_to_responses: bool = (
     os.getenv("LITELLM_ROUTE_ALL_CHAT_OPENAI_TO_RESPONSES", "false").lower() == "true"
 )  # When True, routes all OpenAI /chat/completions requests through the Responses API bridge
+use_chat_completions_url_for_anthropic_responses: bool = (
+    os.getenv(
+        "LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_RESPONSES", "false"
+    ).lower()
+    == "true"
+)  # When True, routes /v1/responses requests for Claude models through the chat/completions bridge instead of native /v1/messages
 # When True, Gemini/Vertex Live setup is deferred until client `session.update`.
 # Default False preserves historical behavior (auto-send setup on connect).
 gemini_live_defer_setup: bool = (

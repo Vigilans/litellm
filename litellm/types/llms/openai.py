@@ -1421,6 +1421,10 @@ class ResponsesAPIStreamEvents(str, Enum):
     FUNCTION_CALL_ARGUMENTS_DELTA = "response.function_call_arguments.delta"
     FUNCTION_CALL_ARGUMENTS_DONE = "response.function_call_arguments.done"
 
+    # Custom tool call events
+    CUSTOM_TOOL_CALL_INPUT_DELTA = "response.custom_tool_call_input.delta"
+    CUSTOM_TOOL_CALL_INPUT_DONE = "response.custom_tool_call_input.done"
+
     # File search events
     FILE_SEARCH_CALL_IN_PROGRESS = "response.file_search_call.in_progress"
     FILE_SEARCH_CALL_SEARCHING = "response.file_search_call.searching"
@@ -1633,6 +1637,22 @@ class FunctionCallArgumentsDoneEvent(BaseLiteLLMOpenAIResponseObject):
     arguments: str
 
 
+class CustomToolCallInputDeltaEvent(BaseLiteLLMOpenAIResponseObject):
+    type: Literal[ResponsesAPIStreamEvents.CUSTOM_TOOL_CALL_INPUT_DELTA]
+    item_id: str
+    output_index: int
+    sequence_number: int
+    delta: str
+
+
+class CustomToolCallInputDoneEvent(BaseLiteLLMOpenAIResponseObject):
+    type: Literal[ResponsesAPIStreamEvents.CUSTOM_TOOL_CALL_INPUT_DONE]
+    item_id: str
+    output_index: int
+    sequence_number: int
+    input: str
+
+
 class FileSearchCallInProgressEvent(BaseLiteLLMOpenAIResponseObject):
     type: Literal[ResponsesAPIStreamEvents.FILE_SEARCH_CALL_IN_PROGRESS]
     output_index: int
@@ -1779,6 +1799,8 @@ ResponsesAPIStreamingResponse = Annotated[
         RefusalDoneEvent,
         FunctionCallArgumentsDeltaEvent,
         FunctionCallArgumentsDoneEvent,
+        CustomToolCallInputDeltaEvent,
+        CustomToolCallInputDoneEvent,
         FileSearchCallInProgressEvent,
         FileSearchCallSearchingEvent,
         FileSearchCallCompletedEvent,

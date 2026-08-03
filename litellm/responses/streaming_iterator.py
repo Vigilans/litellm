@@ -55,7 +55,7 @@ class BaseResponsesAPIStreamingIterator:
 
     def __init__(
         self,
-        response: httpx.Response,
+        response: Optional[httpx.Response],
         model: str,
         responses_api_provider_config: Optional[BaseResponsesAPIConfig],
         logging_obj: LiteLLMLoggingObj,
@@ -100,8 +100,9 @@ class BaseResponsesAPIStreamingIterator:
             "api_base": _api_base,
             "custom_llm_provider": custom_llm_provider,
         }
+        response_headers = response.headers if response is not None else {}
         self._hidden_params["additional_headers"] = process_response_headers(
-            self.response.headers or {}
+            response_headers or {}
         )  # GUARANTEE OPENAI HEADERS IN RESPONSE
 
     def _check_max_streaming_duration(self) -> None:
@@ -597,6 +598,68 @@ class BaseResponsesAPIStreamingIterator:
             )
         except Exception:
             pass
+
+
+class ResponsesAPIEventStreamIterator(BaseResponsesAPIStreamingIterator):
+    def __init__(
+        self,
+        event_iterator: Any,
+        model: str,
+        logging_obj: LiteLLMLoggingObj,
+        litellm_metadata: Optional[Dict[str, Any]] = None,
+        custom_llm_provider: Optional[str] = None,
+        request_data: Optional[Dict[str, Any]] = None,
+        call_type: Optional[str] = None,
+    ):
+        super().__init__(
+            response=None,
+            model=model,
+            responses_api_provider_config=None,
+            logging_obj=logging_obj,
+            litellm_metadata=litellm_metadata,
+            custom_llm_provider=custom_llm_provider,
+            request_data=request_data,
+            call_type=call_type,
+        )
+        self.event_iterator = event_iterator
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> Any:
+        try:
+            self._check_max_streaming_duration()
+            event = await self.event_iterator.__anext__()
+            event_type = getattr(event, "type", None)
+            if event_type in (
+                ResponsesAPIStreamEvents.RESPONSE_COMPLETED,
+                ResponsesAPIStreamEvents.RESPONSE_INCOMPLETE,
+            ):
+                self.completed_response = event
+                self._log_completed_response(is_async=True)
+            elif event_type == ResponsesAPIStreamEvents.ERROR:
+                error = getattr(event, "error", None)
+                message = getattr(error, "message", None) or "Responses stream failed"
+                self._handle_failure(
+                    litellm.APIError(
+                        status_code=500,
+                        message=message,
+                        llm_provider=self.custom_llm_provider or "",
+                        model=self.model or "",
+                    )
+                )
+            return await self._call_post_streaming_deployment_hook(event)
+        except StopAsyncIteration:
+            raise
+        except Exception as error:
+            self.finished = True
+            self._handle_failure(error)
+            raise
+
+    async def aclose(self) -> None:
+        close = getattr(self.event_iterator, "aclose", None)
+        if close is not None:
+            await close()
 
 
 async def call_post_streaming_hooks_for_testing(iterator, chunk):
