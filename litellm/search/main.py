@@ -15,6 +15,7 @@ from litellm.constants import request_timeout
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.base_llm.search.transformation import BaseSearchConfig, SearchResponse
 from litellm.llms.custom_httpx.llm_http_handler import BaseLLMHTTPHandler
+from litellm.search.llm_search import execute_llm_search
 from litellm.types.utils import SearchProviders, SearchProvidersSet
 from litellm.utils import ProviderConfigManager, client, filter_out_litellm_params
 
@@ -339,9 +340,20 @@ def search(
         )
 
         if search_model is not None:
-            raise NotImplementedError(
-                f"Search provider '{search_provider}' resolves to model "
-                f"'{search_model}', but LLM search backends are not implemented yet"
+            if not _is_async:
+                raise ValueError(
+                    f"Search provider '{search_provider}' resolves to model "
+                    f"'{search_model}', which is only supported by litellm.asearch()"
+                )
+            if not isinstance(query, str):
+                raise ValueError(
+                    f"Search provider '{search_provider}' resolves to model "
+                    f"'{search_model}', which only accepts a string query"
+                )
+            return execute_llm_search(
+                query=query,
+                model=search_model,
+                timeout=timeout,
             )
 
         # Call the handler

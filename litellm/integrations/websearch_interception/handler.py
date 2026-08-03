@@ -12,6 +12,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import litellm
+from litellm._internal_context import is_web_search_call
 from litellm._logging import verbose_logger
 from litellm.anthropic_interface import messages as anthropic_messages
 from litellm.constants import LITELLM_WEB_SEARCH_TOOL_NAME
@@ -114,6 +115,9 @@ class WebSearchInterceptionLogger(CustomLogger):
             continue normal processing.
         """
         if not tools:
+            return None
+
+        if is_web_search_call.get():
             return None
 
         # Check if provider is in enabled list
@@ -235,6 +239,12 @@ class WebSearchInterceptionLogger(CustomLogger):
         Instead, we convert it to a regular tool so the model returns tool_use blocks
         that we can intercept and execute ourselves.
         """
+        # A search executed on our behalf carries the same web_search tool we
+        # would rewrite here, and rewriting it would make the search call
+        # search again.
+        if is_web_search_call.get():
+            return None
+
         # Check if this is for an enabled provider
         # Try top-level kwargs first, then nested litellm_params, then derive from model name
         custom_llm_provider = kwargs.get("custom_llm_provider", "") or kwargs.get(
@@ -454,6 +464,9 @@ class WebSearchInterceptionLogger(CustomLogger):
         )
         verbose_logger.debug(f"WebSearchInterception: Response type: {type(response)}")
 
+        if is_web_search_call.get():
+            return False, {}
+
         # Check if provider should be intercepted
         # Note: custom_llm_provider is already normalized by get_llm_provider()
         # (e.g., "bedrock/invoke/..." -> "bedrock")
@@ -556,6 +569,9 @@ class WebSearchInterceptionLogger(CustomLogger):
             f"WebSearchInterception: Chat completion hook called! provider={custom_llm_provider}, stream={stream}"
         )
         verbose_logger.debug(f"WebSearchInterception: Response type: {type(response)}")
+
+        if is_web_search_call.get():
+            return False, {}
 
         # Check if provider should be intercepted
         if (
