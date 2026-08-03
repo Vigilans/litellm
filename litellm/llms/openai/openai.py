@@ -555,7 +555,18 @@ class OpenAIChatCompletion(BaseLLM, BaseOpenAILLM):
                         tools=tools,
                         stream=stream,
                         custom_llm_provider=custom_llm_provider,
-                        kwargs=litellm_params,
+                        kwargs={
+                            **litellm_params,
+                            "deployment_model_name": (
+                                (litellm_params.get("litellm_metadata") or {}).get(
+                                    "deployment_model_name"
+                                )
+                                or (litellm_params.get("metadata") or {}).get(
+                                    "deployment_model_name"
+                                )
+                                or model
+                            ),
+                        },
                     )
 
                     if should_run:

@@ -369,7 +369,18 @@ class BaseLLMHTTPHandler:
             logging_obj=logging_obj,
             stream=False,
             custom_llm_provider=custom_llm_provider,
-            kwargs=litellm_params,
+            kwargs={
+                **litellm_params,
+                "deployment_model_name": (
+                    (litellm_params.get("litellm_metadata") or {}).get(
+                        "deployment_model_name"
+                    )
+                    or (litellm_params.get("metadata") or {}).get(
+                        "deployment_model_name"
+                    )
+                    or model
+                ),
+            },
         )
 
         return final_response if final_response is not None else initial_response
@@ -4887,6 +4898,12 @@ class BaseLLMHTTPHandler:
         callbacks = litellm.callbacks + (logging_obj.dynamic_success_callbacks or [])
         tools = anthropic_messages_optional_request_params.get("tools", [])
         depth, max_loops, fingerprints = self._get_agentic_loop_settings(kwargs=kwargs)
+        metadata = kwargs.get("litellm_metadata") or kwargs.get("metadata") or {}
+        deployment_model_name = (
+            metadata.get("deployment_model_name")
+            if isinstance(metadata, dict)
+            else None
+        ) or model
 
         for callback in callbacks:
             if not isinstance(callback, CustomLogger):
@@ -4908,7 +4925,7 @@ class BaseLLMHTTPHandler:
                     tools=tools,
                     stream=stream,
                     custom_llm_provider=custom_llm_provider,
-                    kwargs=kwargs,
+                    kwargs={**kwargs, "deployment_model_name": deployment_model_name},
                 )
             except Exception as e:
                 _call_id = getattr(logging_obj, "litellm_call_id", "unknown")

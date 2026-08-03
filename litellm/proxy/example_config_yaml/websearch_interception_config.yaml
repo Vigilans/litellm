@@ -13,4 +13,5 @@ litellm_settings:
   callbacks: ["websearch_interception"]
   websearch_interception_params:
     enabled_providers: ["bedrock"]
+    enabled_models: ["claude-*", "*-max"]
     search_tool_name: "my-perplexity-search"

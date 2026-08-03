@@ -224,7 +224,6 @@ class GenericLiteLLMParams(CredentialLiteLLMParams, CustomPricingLiteLLMParams):
     merge_reasoning_content_in_choices: Optional[bool] = False
     force_reasoning_effort: Optional[str] = None
     force_websearch_model: Optional[str] = None
-    force_websearch_interception: Optional[bool] = None
     model_info: Optional[Dict] = None
     mock_response: Optional[Union[str, ModelResponse, Exception, Any]] = None
 
@@ -356,8 +355,6 @@ class LiteLLMParamsTypedDict(TypedDict, total=False):
     use_chat_completions_api: Optional[bool]
     ## WEB SEARCH REDIRECT ##
     force_websearch_model: Optional[str]
-    ## WEB SEARCH INTERCEPTION ##
-    force_websearch_interception: Optional[bool]
     ## UNIFIED PROJECT/REGION ##
     region_name: Optional[str]
     ## VERTEX AI ##

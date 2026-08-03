@@ -13,15 +13,15 @@ class WebSearchInterceptionConfig(TypedDict, total=False):
         litellm_settings:
           websearch_interception_params:
             enabled_providers: ["bedrock"]
+            enabled_models: ["claude-*", "*-max"]
             search_tool_name: "my-perplexity-search"
-            skip_models_with_web_search: true
     """
 
     enabled_providers: List[str]
     """List of LLM provider names to enable interception for (e.g., ['bedrock', 'vertex_ai'])"""
 
+    enabled_models: Optional[List[str]]
+    """Glob patterns matched against the selected Router deployment's model_name."""
+
     search_tool_name: Optional[str]
     """Name of search tool configured in router's search_tools. If None, uses first available."""
-
-    skip_models_with_web_search: Optional[bool]
-    """Leave models that can search on their own to do it themselves. Off by default."""
