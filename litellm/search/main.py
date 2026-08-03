@@ -15,7 +15,6 @@ from litellm.constants import request_timeout
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
 from litellm.llms.base_llm.search.transformation import BaseSearchConfig, SearchResponse
 from litellm.llms.custom_httpx.llm_http_handler import BaseLLMHTTPHandler
-from litellm.search.llm_search import execute_llm_search
 from litellm.types.utils import SearchProviders, SearchProvidersSet
 from litellm.utils import ProviderConfigManager, client, filter_out_litellm_params
 
@@ -57,30 +56,12 @@ def _build_search_optional_params(
 
 
 def _resolve_search_provider_as_model(search_provider: str) -> Optional[str]:
-    """
-    Resolve ``search_provider`` to a router model group name.
+    """Return the name when it identifies a model group or alias on this Search Router."""
+    from litellm.search._context import search_router
 
-    Only consulted for values that are not ``SearchProviders`` members, so a
-    name that is both a search provider and an LLM provider always keeps its
-    search meaning. Matching is against configured group names and aliases
-    only, so a mistyped provider keeps raising instead of being absorbed by a
-    wildcard route such as ``gpt-*``.
-    """
-    try:
-        from litellm.proxy.proxy_server import llm_router
-    except ImportError:
-        verbose_logger.debug(
-            "Search: could not import llm_router from proxy_server, "
-            f"treating '{search_provider}' as an unknown provider"
-        )
-        return None
-
-    if llm_router is None:
-        return None
-
-    if search_provider in llm_router.get_model_names():
+    router = search_router.get()
+    if router is not None and search_provider in router.get_model_names():
         return search_provider
-
     return None
 
 
@@ -271,27 +252,6 @@ def search(
         if isinstance(query, list) and not all(isinstance(q, str) for q in query):
             raise ValueError("All items in query list must be strings")
 
-        # Get provider config
-        search_model: Optional[str] = None
-        if search_provider in SearchProvidersSet:
-            search_provider_config: Optional[BaseSearchConfig] = (
-                ProviderConfigManager.get_provider_search_config(
-                    provider=SearchProviders(search_provider),
-                )
-            )
-
-            if search_provider_config is None:
-                raise ValueError(
-                    f"Search is not supported for provider: {search_provider}"
-                )
-        else:
-            search_model = _resolve_search_provider_as_model(search_provider)
-            if search_model is None:
-                raise ValueError(
-                    f"Search is not supported for provider: {search_provider}"
-                )
-            search_provider_config = None
-
         verbose_logger.debug(f"Search call - provider: {search_provider}")
 
         # Build optional_params from explicit parameters
@@ -312,65 +272,74 @@ def search(
 
         verbose_logger.debug(f"Search optional_params: {optional_params}")
 
-        headers: Dict[str, Any] = {}
-        complete_url: Optional[str] = None
-        if search_provider_config is not None:
+        model_name = f"{search_provider}/search"
+        if search_provider in SearchProvidersSet:
+            search_provider_config: Optional[BaseSearchConfig] = (
+                ProviderConfigManager.get_provider_search_config(
+                    provider=SearchProviders(search_provider),
+                )
+            )
+            if search_provider_config is None:
+                raise ValueError(
+                    f"Search is not supported for provider: {search_provider}"
+                )
+
             headers = search_provider_config.validate_environment(
                 api_key=api_key,
                 api_base=api_base,
                 headers=extra_headers or {},
             )
-
             complete_url = search_provider_config.get_complete_url(
                 api_base=api_base,
                 optional_params=optional_params,
             )
 
-        # Pre Call logging
-        model_name = f"{search_provider}/search"
-        litellm_logging_obj.update_from_kwargs(
-            kwargs=kwargs,
-            model=model_name,
-            optional_params=optional_params,
-            litellm_params={
-                "litellm_call_id": litellm_call_id,
-                "api_base": complete_url,
-            },
-            custom_llm_provider=search_provider,
-        )
-
-        if search_model is not None:
-            if not _is_async:
-                raise ValueError(
-                    f"Search provider '{search_provider}' resolves to model "
-                    f"'{search_model}', which is only supported by litellm.asearch()"
-                )
-            if not isinstance(query, str):
-                raise ValueError(
-                    f"Search provider '{search_provider}' resolves to model "
-                    f"'{search_model}', which only accepts a string query"
-                )
-            return execute_llm_search(
-                query=query,
-                model=search_model,
-                timeout=timeout,
+            # Pre Call logging
+            litellm_logging_obj.update_from_kwargs(
+                kwargs=kwargs,
+                model=model_name,
+                optional_params=optional_params,
+                litellm_params={
+                    "litellm_call_id": litellm_call_id,
+                    "api_base": complete_url,
+                },
+                custom_llm_provider=search_provider,
             )
 
-        # Call the handler
-        response = base_llm_http_handler.search(
-            query=query,
-            optional_params=optional_params,
-            timeout=timeout or request_timeout,
-            logging_obj=litellm_logging_obj,
-            api_key=api_key,
-            api_base=complete_url,
-            custom_llm_provider=search_provider,
-            asearch=_is_async,
-            headers=headers,
-            provider_config=search_provider_config,
-        )
+            # Call the handler
+            response = base_llm_http_handler.search(
+                query=query,
+                optional_params=optional_params,
+                timeout=timeout or request_timeout,
+                logging_obj=litellm_logging_obj,
+                api_key=api_key,
+                api_base=complete_url,
+                custom_llm_provider=search_provider,
+                asearch=_is_async,
+                headers=headers,
+                provider_config=search_provider_config,
+            )
+            return response
+        else:
+            search_model = _resolve_search_provider_as_model(search_provider)
+            if search_model is None:
+                raise ValueError(
+                    f"Search is not supported for provider: {search_provider}"
+                )
 
-        return response
+            # Pre Call logging
+            litellm_logging_obj.update_from_kwargs(
+                kwargs=kwargs,
+                model=model_name,
+                optional_params=optional_params,
+                litellm_params={"litellm_call_id": litellm_call_id},
+                custom_llm_provider=search_provider,
+            )
+
+            raise NotImplementedError(
+                f"Search provider '{search_provider}' resolves to model "
+                f"'{search_model}', but LLM search backends are not implemented yet"
+            )
     except Exception as e:
         model_name = f"{search_provider}/search"
         raise litellm.exception_type(

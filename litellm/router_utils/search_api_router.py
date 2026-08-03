@@ -233,15 +233,20 @@ class SearchAPIRouter:
                 f"Selected search tool with provider: {search_provider}"
             )
 
-            # Call the original search function with the provider config
-            response = await original_generic_function(
-                search_provider=search_provider,
-                api_key=api_key,
-                api_base=api_base,
-                **kwargs,
-            )
+            from litellm.search._context import search_router
 
-            return response
+            # Bind the Router handling this call so independent Router instances
+            # resolve model-backed providers against their own model groups.
+            token = search_router.set(router_instance)
+            try:
+                return await original_generic_function(
+                    search_provider=search_provider,
+                    api_key=api_key,
+                    api_base=api_base,
+                    **kwargs,
+                )
+            finally:
+                search_router.reset(token)
 
         except Exception as e:
             verbose_router_logger.error(
