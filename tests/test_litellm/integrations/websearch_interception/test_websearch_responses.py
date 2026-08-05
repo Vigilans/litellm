@@ -33,6 +33,7 @@ def _request_data(**overrides):
                 "parameters": {"type": "object"},
             }
         ],
+        "tool_choice": "required",
         "custom_llm_provider": "github_copilot",
         "litellm_metadata": {"deployment_model_name": "gpt-5.6-sol-max"},
     }
@@ -101,6 +102,8 @@ async def test_responses_hook_replays_output_and_preserves_search_citations():
     assert result is final
     follow_up = call.await_args.kwargs
     assert follow_up["model"] == "gpt-5.6-sol"
+    assert follow_up["tools"] == _request_data()["tools"]
+    assert follow_up["tool_choice"] == "auto"
     assert follow_up["input"] == [
         {"role": "user", "content": "latest news"},
         reasoning,

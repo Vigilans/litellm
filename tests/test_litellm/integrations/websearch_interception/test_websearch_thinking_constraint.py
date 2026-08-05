@@ -306,13 +306,18 @@ class TestLoggingObjExcludedFromFollowUp:
                 messages=[{"role": "user", "content": "hi"}],
                 tool_calls=_make_tool_calls(),
                 thinking_blocks=[],
-                anthropic_messages_optional_request_params={"max_tokens": 4096},
+                anthropic_messages_optional_request_params={
+                    "max_tokens": 4096,
+                    "tools": [{"name": "litellm_web_search"}],
+                    "tool_choice": {"type": "any"},
+                },
                 logging_obj=fake_logging_obj,
                 stream=False,
                 kwargs={
                     "litellm_logging_obj": fake_logging_obj,
                     "metadata": {"user_api_key": "test-key-hash"},
                     "temperature": 0.5,
+                    "tool_choice": {"type": "any"},
                 },
             )
 
@@ -321,6 +326,8 @@ class TestLoggingObjExcludedFromFollowUp:
         # But other kwargs (metadata, temperature) must be preserved
         assert captured_kwargs.get("metadata") == {"user_api_key": "test-key-hash"}
         assert captured_kwargs.get("temperature") == 0.5
+        assert captured_kwargs["tools"] == [{"name": "litellm_web_search"}]
+        assert captured_kwargs["tool_choice"] == {"type": "auto"}
 
     @pytest.mark.asyncio
     async def test_websearch_flags_also_excluded(self):

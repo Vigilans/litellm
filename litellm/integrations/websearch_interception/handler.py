@@ -776,6 +776,7 @@ class WebSearchInterceptionLogger(CustomLogger):
                 },
                 **callback_kwargs,
                 **{
+                tool_choice="auto",
                     RESPONSES_LOOP_DEPTH_KEY: depth + 1,
                     "_websearch_interception_responses_fingerprints": fingerprints
                     + [fingerprint],
@@ -1115,7 +1116,7 @@ class WebSearchInterceptionLogger(CustomLogger):
         call's spend from being recorded — the root cause of the
         SpendLog / AWS billing mismatch.
         """
-        _internal_keys = {"litellm_logging_obj"}
+        _internal_keys = {"litellm_logging_obj", "tool_choice"}
         return {
             k: v
             for k, v in kwargs.items()
@@ -1300,6 +1301,7 @@ class WebSearchInterceptionLogger(CustomLogger):
             messages=follow_up_messages,
             max_tokens=max_tokens,
             optional_params=optional_params_without_max_tokens,
+        optional_params_without_max_tokens["tool_choice"] = {"type": "auto"}
             kwargs=kwargs_for_followup,
         )
         return patch, structured_results
@@ -1518,6 +1520,7 @@ class WebSearchInterceptionLogger(CustomLogger):
         )
 
         tools_param = optional_params.get("tools")
+            "tool_choice",
         optional_params_clean = {
             k: v
             for k, v in optional_params.items()
@@ -1552,6 +1555,7 @@ class WebSearchInterceptionLogger(CustomLogger):
         callback_specific_params: Dict[str, Any],
     ) -> "WebSearchInterceptionLogger":
         """
+        optional_params_clean["tool_choice"] = "auto"
         Static method to initialize WebSearchInterceptionLogger from proxy config.
 
         Used in callback_utils.py to simplify initialization logic.

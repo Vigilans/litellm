@@ -6,7 +6,7 @@ litellm.acompletion() for transparent server-side web search execution.
 """
 
 import os
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -110,6 +110,45 @@ async def test_websearch_chat_completion_with_openai():
     finally:
         # Restore original callbacks
         litellm.callbacks = original_callbacks
+
+
+@pytest.mark.asyncio
+async def test_chat_rerun_preserves_search_tool_and_uses_auto_choice():
+    logger = WebSearchInterceptionLogger(enabled_providers=[LlmProviders.OPENAI])
+    logger._execute_search = AsyncMock(return_value=("search result", None))  # type: ignore
+
+    patch = await logger._build_chat_completion_request_patch(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Search the web"}],
+        tool_calls=[
+            {
+                "id": "call_1",
+                "name": "litellm_web_search",
+                "input": {"query": "latest release"},
+            }
+        ],
+        optional_params={
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"name": "litellm_web_search"},
+                }
+            ],
+            "tool_choice": "required",
+            "temperature": 0.2,
+        },
+        kwargs={"tool_choice": "required"},
+    )
+
+    assert patch.optional_params["tools"] == [
+        {
+            "type": "function",
+            "function": {"name": "litellm_web_search"},
+        }
+    ]
+    assert patch.optional_params["tool_choice"] == "auto"
+    assert patch.optional_params["temperature"] == 0.2
+    assert "tool_choice" not in patch.kwargs
 
 
 @pytest.mark.asyncio
