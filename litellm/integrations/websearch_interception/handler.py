@@ -318,6 +318,16 @@ class WebSearchInterceptionLogger(CustomLogger):
             if is_web_search_tool(tool):
                 # Convert to LiteLLM standard web search tool
                 converted_tools.append(replacement)
+                tool_choice = kwargs.get("tool_choice")
+                if (
+                    isinstance(tool_choice, dict)
+                    and tool_choice.get("type") == "tool"
+                    and tool_choice.get("name") == tool.get("name")
+                ):
+                    kwargs["tool_choice"] = {
+                        **tool_choice,
+                        "name": LITELLM_WEB_SEARCH_TOOL_NAME,
+                    }
                 verbose_logger.debug(
                     f"WebSearchInterception: Converted {tool.get('name', 'unknown')} "
                     f"(type={tool.get('type', 'none')}) to {LITELLM_WEB_SEARCH_TOOL_NAME}"
@@ -455,6 +465,16 @@ class WebSearchInterceptionLogger(CustomLogger):
             if is_web_search_tool(tool):
                 standard_tool = get_litellm_web_search_tool()
                 converted_tools.append(standard_tool)
+                tool_choice = kwargs.get("tool_choice")
+                if (
+                    isinstance(tool_choice, dict)
+                    and tool_choice.get("type") == "tool"
+                    and tool_choice.get("name") == tool.get("name")
+                ):
+                    kwargs["tool_choice"] = {
+                        **tool_choice,
+                        "name": standard_tool["name"],
+                    }
                 verbose_logger.debug(
                     f"WebSearchInterception: Converted {tool.get('name', 'unknown')} "
                     f"(type={tool.get('type', 'none')}) to {LITELLM_WEB_SEARCH_TOOL_NAME}"
@@ -756,6 +776,7 @@ class WebSearchInterceptionLogger(CustomLogger):
                 model=request_data.get("model", model_name),
                 input=input_items + response_items + tool_results,
                 tools=tools,
+                tool_choice="auto",
                 custom_llm_provider=provider,
                 stream=False,
                 **{
@@ -776,7 +797,6 @@ class WebSearchInterceptionLogger(CustomLogger):
                 },
                 **callback_kwargs,
                 **{
-                tool_choice="auto",
                     RESPONSES_LOOP_DEPTH_KEY: depth + 1,
                     "_websearch_interception_responses_fingerprints": fingerprints
                     + [fingerprint],
@@ -1281,6 +1301,7 @@ class WebSearchInterceptionLogger(CustomLogger):
             for k, v in anthropic_messages_optional_request_params.items()
             if k != "max_tokens"
         }
+        optional_params_without_max_tokens["tool_choice"] = {"type": "auto"}
         kwargs_for_followup = self._prepare_followup_kwargs(kwargs)
 
         if logging_obj is not None:
@@ -1301,7 +1322,6 @@ class WebSearchInterceptionLogger(CustomLogger):
             messages=follow_up_messages,
             max_tokens=max_tokens,
             optional_params=optional_params_without_max_tokens,
-        optional_params_without_max_tokens["tool_choice"] = {"type": "auto"}
             kwargs=kwargs_for_followup,
         )
         return patch, structured_results
@@ -1500,6 +1520,7 @@ class WebSearchInterceptionLogger(CustomLogger):
             "model_alias_map",
             "stream_response",
             "custom_prompt_dict",
+            "tool_choice",
         }
         kwargs_for_followup = {
             k: v
@@ -1520,7 +1541,6 @@ class WebSearchInterceptionLogger(CustomLogger):
         )
 
         tools_param = optional_params.get("tools")
-            "tool_choice",
         optional_params_clean = {
             k: v
             for k, v in optional_params.items()
@@ -1535,6 +1555,7 @@ class WebSearchInterceptionLogger(CustomLogger):
         }
         if tools_param is not None:
             optional_params_clean["tools"] = tools_param
+        optional_params_clean["tool_choice"] = "auto"
 
         return AgenticLoopRequestPatch(
             model=full_model_name,
@@ -1555,7 +1576,6 @@ class WebSearchInterceptionLogger(CustomLogger):
         callback_specific_params: Dict[str, Any],
     ) -> "WebSearchInterceptionLogger":
         """
-        optional_params_clean["tool_choice"] = "auto"
         Static method to initialize WebSearchInterceptionLogger from proxy config.
 
         Used in callback_utils.py to simplify initialization logic.

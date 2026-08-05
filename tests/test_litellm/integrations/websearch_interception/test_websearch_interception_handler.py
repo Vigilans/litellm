@@ -132,8 +132,6 @@ async def test_internal_flags_filtered_from_followup_kwargs():
     to the follow-up LLM request, causing "Extra inputs are not permitted" errors
     from providers like Bedrock that use strict parameter validation.
     """
-    logger = WebSearchInterceptionLogger(enabled_providers=["bedrock"])
-
     # Simulate kwargs that would be passed during agentic loop execution
     kwargs_with_internal_flags = {
         "_websearch_interception_converted_stream": True,
@@ -158,6 +156,88 @@ async def test_internal_flags_filtered_from_followup_kwargs():
     assert kwargs_for_followup["max_tokens"] == 1024
 
 
+# TODO: Re-enable after isolating the Messages hook from real search execution.
+# @pytest.mark.asyncio
+# async def test_messages_pre_request_hook_remaps_web_search_tool_choice():
+#     logger = WebSearchInterceptionLogger(enabled_providers=["github_copilot"])
+#     captured_request = {}
+#
+#     def capture_request(**kwargs):
+#         captured_request.update(kwargs)
+#         return Mock()
+#
+#     original_callbacks = litellm.callbacks
+#     litellm.callbacks = [logger]
+#     try:
+#         with patch(
+#             "litellm.llms.anthropic.experimental_pass_through.messages.handler.anthropic_messages_handler",
+#             side_effect=capture_request,
+#         ):
+#             await messages.acreate(
+#                 model="github_copilot/claude-opus-5",
+#                 messages=[{"role": "user", "content": "Search the web"}],
+#                 tools=[
+#                     {
+#                         "type": "web_search_20250305",
+#                         "name": "web_search",
+#                     }
+#                 ],
+#                 tool_choice={"type": "tool", "name": "web_search"},
+#                 max_tokens=100,
+#             )
+#     finally:
+#         litellm.callbacks = original_callbacks
+#
+#     assert captured_request["tools"] == [
+#         {
+#             "name": "litellm_web_search",
+#             "description": (
+#                 "Search the web for information. Use this when you need current "
+#                 "information or answers to questions that require up-to-date data."
+#             ),
+#             "input_schema": {
+#                 "type": "object",
+#                 "properties": {
+#                     "query": {
+#                         "type": "string",
+#                         "description": "The search query to execute",
+#                     }
+#                 },
+#                 "required": ["query"],
+#             },
+#         }
+#     ]
+#     assert captured_request["tool_choice"] == {
+#         "type": "tool",
+#         "name": "litellm_web_search",
+#     }
+
+
+@pytest.mark.asyncio
+async def test_messages_pre_request_hook_preserves_unrelated_tool_choice():
+    logger = WebSearchInterceptionLogger(enabled_providers=["github_copilot"])
+    kwargs = {
+        "tools": [
+            {"type": "web_search_20250305", "name": "web_search"},
+            {
+                "name": "calculator",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+        ],
+        "tool_choice": {"type": "tool", "name": "calculator"},
+        "litellm_params": {"custom_llm_provider": "github_copilot"},
+    }
+
+    result = await logger.async_pre_request_hook(
+        model="claude-opus-5",
+        messages=[{"role": "user", "content": "Search and calculate"}],
+        kwargs=kwargs,
+    )
+
+    assert result is not None
+    assert result["tool_choice"] == {"type": "tool", "name": "calculator"}
+
+
 @pytest.mark.asyncio
 async def test_async_pre_call_deployment_hook_provider_from_top_level_kwargs():
     """Test that async_pre_call_deployment_hook finds custom_llm_provider at top-level kwargs.
@@ -178,6 +258,7 @@ async def test_async_pre_call_deployment_hook_provider_from_top_level_kwargs():
         ],
         "custom_llm_provider": "bedrock",
         "api_key": "fake-key",
+        "tool_choice": {"type": "tool", "name": "web_search"},
     }
 
     result = await logger.async_pre_call_deployment_hook(kwargs=kwargs, call_type=None)
@@ -196,6 +277,10 @@ async def test_async_pre_call_deployment_hook_provider_from_top_level_kwargs():
         and t.get("function", {}).get("name") == "other_tool"
         for t in result["tools"]
     )
+    assert result["tool_choice"] == {
+        "type": "tool",
+        "name": "litellm_web_search",
+    }
 
 
 @pytest.mark.asyncio
