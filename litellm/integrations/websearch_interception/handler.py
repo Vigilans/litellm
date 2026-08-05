@@ -8,12 +8,13 @@ server-side using litellm router's search tools.
 
 import asyncio
 import fnmatch
+import json
 import math
 import uuid
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import litellm
-from litellm._internal_context import is_web_search_call
+from litellm._internal_context import is_internal_call, is_web_search_call
 from litellm._logging import verbose_logger
 from litellm.anthropic_interface import messages as anthropic_messages
 from litellm.constants import LITELLM_WEB_SEARCH_TOOL_NAME
@@ -37,7 +38,8 @@ from litellm.types.integrations.custom_logger import (
     AgenticLoopPlan,
     AgenticLoopRequestPatch,
 )
-from litellm.types.llms.openai import AllMessageValues
+from litellm.types.llms.openai import AllMessageValues, ResponsesAPIResponse
+from openai.types.responses.response_output_text import AnnotationURLCitation
 from litellm.types.utils import LlmProviders
 from litellm.utils import ProviderConfigManager
 
@@ -50,6 +52,7 @@ WEBSEARCH_EMIT_NATIVE_BLOCKS_KEY = "_websearch_interception_emit_native_blocks"
 # Key on ``AgenticLoopPlan.metadata`` carrying the list of pre-built
 # ``web_search_tool_result`` blocks to inject into the final response.
 WEBSEARCH_NATIVE_BLOCKS_METADATA_KEY = "websearch_native_blocks"
+RESPONSES_LOOP_DEPTH_KEY = "_websearch_interception_responses_depth"
 
 
 class WebSearchInterceptionLogger(CustomLogger):
@@ -651,6 +654,214 @@ class WebSearchInterceptionLogger(CustomLogger):
         }
         return True, tools_dict
 
+    async def async_post_call_success_deployment_hook(
+        self,
+        request_data: dict,
+        response: Any,
+        call_type: Optional[Any],
+    ) -> Optional[Any]:
+        if getattr(call_type, "value", call_type) not in ("responses", "aresponses"):
+            return None
+        if not isinstance(response, ResponsesAPIResponse):
+            return None
+
+        provider = response._hidden_params.get(
+            "custom_llm_provider"
+        ) or request_data.get("custom_llm_provider", "")
+        if not provider:
+            provider = request_data.get("litellm_params", {}).get(
+                "custom_llm_provider", ""
+            )
+        metadata = (
+            request_data.get("litellm_metadata") or request_data.get("metadata") or {}
+        )
+        model_name = metadata.get("deployment_model_name") or request_data.get(
+            "model", ""
+        )
+        tools = request_data.get("tools") or []
+        if provider not in self.enabled_providers or not self._model_is_enabled(
+            model_name
+        ):
+            return None
+        if not any(
+            tool.get("type") == "function"
+            and tool.get("name") == LITELLM_WEB_SEARCH_TOOL_NAME
+            for tool in tools
+        ):
+            return None
+
+        should_run, tool_calls = WebSearchTransformation.transform_request(
+            response=response,
+            stream=False,
+            response_format="responses",
+        )
+        if not should_run:
+            return None
+
+        depth = int(request_data.get(RESPONSES_LOOP_DEPTH_KEY, 0) or 0)
+        max_loops = int(request_data.get("max_agentic_loops", 3) or 3)
+        if depth >= max_loops:
+            raise ValueError(
+                f"Exceeded max_agentic_loops={max_loops} for model={model_name}"
+            )
+        fingerprint = json.dumps(tool_calls, sort_keys=True, default=str)
+        fingerprints = list(
+            request_data.get("_websearch_interception_responses_fingerprints", []) or []
+        )
+        if fingerprint in fingerprints:
+            raise ValueError(
+                "Web search loop detected repeated tool-call fingerprint; aborting rerun"
+            )
+
+        search_results = await asyncio.gather(
+            *[
+                (
+                    self._execute_search(tool_call["input"]["query"])
+                    if tool_call.get("input", {}).get("query")
+                    else self._create_empty_search_result()
+                )
+                for tool_call in tool_calls
+            ]
+        )
+        tool_results = [
+            {
+                "type": "function_call_output",
+                "call_id": tool_call.get("call_id"),
+                "output": result[0],
+            }
+            for tool_call, result in zip(tool_calls, search_results)
+        ]
+        original_input = request_data.get("input")
+        input_items = (
+            list(original_input)
+            if isinstance(original_input, list)
+            else [{"role": "user", "content": str(original_input)}]
+        )
+        response_items = [
+            item if isinstance(item, dict) else item.model_dump(exclude_none=True)
+            for item in response.output
+        ]
+
+        callback_kwargs: Dict[str, Any] = {}
+        logging_obj = request_data.get("litellm_logging_obj")
+        if logging_obj is not None and logging_obj.dynamic_success_callbacks:
+            callback_kwargs["success_callback"] = list(
+                logging_obj.dynamic_success_callbacks
+            )
+
+        previous_internal = is_internal_call.get()
+        is_internal_call.set(True)
+        try:
+            follow_up: ResponsesAPIResponse = await litellm.aresponses(
+                model=request_data.get("model", model_name),
+                input=input_items + response_items + tool_results,
+                tools=tools,
+                custom_llm_provider=provider,
+                stream=False,
+                **{
+                    key: value
+                    for key, value in request_data.items()
+                    if key
+                    not in {
+                        "input",
+                        "model",
+                        "tools",
+                        "tool_choice",
+                        "stream",
+                        "custom_llm_provider",
+                        "litellm_call_id",
+                        "litellm_logging_obj",
+                    }
+                    and not key.startswith("_websearch_interception")
+                },
+                **callback_kwargs,
+                **{
+                    RESPONSES_LOOP_DEPTH_KEY: depth + 1,
+                    "_websearch_interception_responses_fingerprints": fingerprints
+                    + [fingerprint],
+                },
+            )
+        finally:
+            is_internal_call.set(previous_internal)
+        structured = [result[1] for result in search_results if result[1] is not None]
+        final_response = self._add_responses_citations(follow_up, structured)
+        if request_data.get("_websearch_interception_converted_stream"):
+            from litellm.responses.streaming_iterator import (
+                CachedResponsesAPIStreamingIterator,
+            )
+
+            request_data["stream"] = True
+            return CachedResponsesAPIStreamingIterator(
+                response=final_response,
+                logging_obj=request_data["litellm_logging_obj"],
+                request_data=request_data,
+                call_type="aresponses",
+                custom_llm_provider=provider,
+                cache_hit=None,
+            )
+        return final_response
+
+    @staticmethod
+    def _add_responses_citations(
+        response: ResponsesAPIResponse,
+        search_results: List[SearchResponse],
+    ) -> ResponsesAPIResponse:
+        sources = [result for search in search_results for result in search.results]
+        if not sources:
+            return response
+        for item in reversed(response.output):
+            item_type = (
+                item.get("type")
+                if isinstance(item, dict)
+                else getattr(item, "type", None)
+            )
+            if item_type != "message":
+                continue
+            content = (
+                item.get("content", [])
+                if isinstance(item, dict)
+                else getattr(item, "content", [])
+            )
+            for block in content:
+                block_type = (
+                    block.get("type")
+                    if isinstance(block, dict)
+                    else getattr(block, "type", None)
+                )
+                if block_type != "output_text":
+                    continue
+                text = (
+                    block.get("text", "")
+                    if isinstance(block, dict)
+                    else getattr(block, "text", "")
+                )
+                annotations = list(
+                    block.get("annotations", [])
+                    if isinstance(block, dict)
+                    else getattr(block, "annotations", [])
+                )
+                for source in sources:
+                    start = len(text)
+                    marker = f" [{source.title}]({source.url})"
+                    text += marker
+                    annotations.append(
+                        AnnotationURLCitation(
+                            type="url_citation",
+                            url=source.url,
+                            title=source.title,
+                            start_index=start,
+                            end_index=len(text),
+                        )
+                    )
+                if isinstance(block, dict):
+                    block["text"] = text
+                    block["annotations"] = annotations
+                else:
+                    block.text = text
+                    block.annotations = annotations
+                return response
+        return response
+
     async def async_run_agentic_loop(
         self,
         tools: Dict,
@@ -1115,53 +1326,29 @@ class WebSearchInterceptionLogger(CustomLogger):
                 )
                 llm_router = None
 
-            # Determine search provider from router's search_tools
-            search_provider: Optional[str] = None
             if llm_router is not None and hasattr(llm_router, "search_tools"):
                 if self.search_tool_name:
-                    # Find specific search tool by name
-                    matching_tools = [
-                        tool
-                        for tool in llm_router.search_tools
-                        if tool.get("search_tool_name") == self.search_tool_name
-                    ]
-                    if matching_tools:
-                        search_tool = matching_tools[0]
-                        search_provider = search_tool.get("litellm_params", {}).get(
-                            "search_provider"
-                        )
-                        verbose_logger.debug(
-                            f"WebSearchInterception: Found search tool '{self.search_tool_name}' "
-                            f"with provider '{search_provider}'"
-                        )
-                    else:
-                        verbose_logger.debug(
-                            f"WebSearchInterception: Search tool '{self.search_tool_name}' not found in router, "
-                            "falling back to first available or perplexity"
-                        )
-
-                # If no specific tool or not found, use first available
-                if not search_provider and llm_router.search_tools:
-                    first_tool = llm_router.search_tools[0]
-                    search_provider = first_tool.get("litellm_params", {}).get(
-                        "search_provider"
+                    search_tool_name = self.search_tool_name
+                elif llm_router.search_tools:
+                    search_tool_name = llm_router.search_tools[0].get(
+                        "search_tool_name"
                     )
-                    verbose_logger.debug(
-                        f"WebSearchInterception: Using first available search tool with provider '{search_provider}'"
-                    )
+                else:
+                    search_tool_name = None
 
-            # Fallback to perplexity if no router or no search tools configured
-            if not search_provider:
-                search_provider = "perplexity"
-                verbose_logger.debug(
-                    "WebSearchInterception: No search tools configured in router, "
-                    f"using default provider '{search_provider}'"
+                if search_tool_name:
+                    result = await llm_router.asearch(
+                        query=query,
+                        search_tool_name=search_tool_name,
+                    )
+                else:
+                    result = await litellm.asearch(
+                        query=query, search_provider="perplexity"
+                    )
+            else:
+                result = await litellm.asearch(
+                    query=query, search_provider="perplexity"
                 )
-
-            verbose_logger.debug(
-                f"WebSearchInterception: Executing search for '{query}' using provider '{search_provider}'"
-            )
-            result = await litellm.asearch(query=query, search_provider=search_provider)
 
             # Format using transformation function
             search_result_text = WebSearchTransformation.format_search_response(result)

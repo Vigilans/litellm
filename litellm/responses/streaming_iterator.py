@@ -913,6 +913,8 @@ class CachedResponsesAPIStreamingIterator(BaseResponsesAPIStreamingIterator):
         logging_obj: LiteLLMLoggingObj,
         request_data: Optional[Dict[str, Any]] = None,
         call_type: Optional[str] = None,
+        custom_llm_provider: str = "cached_response",
+        cache_hit: Optional[bool] = True,
     ):
         BaseResponsesAPIStreamingIterator.__init__(
             self,
@@ -921,12 +923,12 @@ class CachedResponsesAPIStreamingIterator(BaseResponsesAPIStreamingIterator):
             responses_api_provider_config=None,
             logging_obj=logging_obj,
             litellm_metadata=None,
-            custom_llm_provider="cached_response",
+            custom_llm_provider=custom_llm_provider,
             request_data=request_data,
             call_type=call_type,
         )
-        self._completed_response_cache_hit = True
-        self._persist_completed_response_before_logging = False
+        self._completed_response_cache_hit = cache_hit
+        self._persist_completed_response_before_logging = cache_hit is not True
         self._events: List[Any] = []
         self._idx = 0
         self._set_events_from_response(transformed=response, logging_obj=logging_obj)

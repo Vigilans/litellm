@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from litellm._logging import verbose_logger
 from litellm.constants import LITELLM_WEB_SEARCH_TOOL_NAME
 from litellm.llms.base_llm.search.transformation import SearchResponse
+from litellm.types.llms.openai import ResponsesAPIResponse
 
 
 class WebSearchTransformation:
@@ -61,8 +62,37 @@ class WebSearchTransformation:
         # Parse non-streaming response based on format
         if response_format == "openai":
             return WebSearchTransformation._detect_from_openai_response(response)
-        else:
-            return WebSearchTransformation._detect_from_non_streaming_response(response)
+        if response_format == "responses":
+            return WebSearchTransformation._detect_from_responses_response(response)
+        return WebSearchTransformation._detect_from_non_streaming_response(response)
+
+    @staticmethod
+    def _detect_from_responses_response(
+        response: ResponsesAPIResponse,
+    ) -> Tuple[bool, List[Dict]]:
+        tool_calls: List[Dict] = []
+        for item in response.output:
+            values = item if isinstance(item, dict) else item.model_dump()
+            if (
+                values.get("type") != "function_call"
+                or values.get("name") != LITELLM_WEB_SEARCH_TOOL_NAME
+            ):
+                continue
+            arguments = values.get("arguments") or "{}"
+            try:
+                parsed = (
+                    json.loads(arguments) if isinstance(arguments, str) else arguments
+                )
+            except json.JSONDecodeError:
+                parsed = {}
+            tool_calls.append(
+                {
+                    "call_id": values.get("call_id"),
+                    "name": values.get("name"),
+                    "input": parsed if isinstance(parsed, dict) else {},
+                }
+            )
+        return bool(tool_calls), tool_calls
 
     @staticmethod
     def _detect_from_non_streaming_response(
@@ -145,25 +175,21 @@ class WebSearchTransformation:
             verbose_logger.debug("WebSearchInterception: Response has empty choices")
             return False, []
 
-        # Get first choice's message
-        first_choice = choices[0]
-        if isinstance(first_choice, dict):
-            message = first_choice.get("message", {})
-        else:
-            message = getattr(first_choice, "message", None)
-
-        if not message:
-            verbose_logger.debug("WebSearchInterception: First choice has no message")
-            return False, []
-
-        # Get tool_calls from message
-        if isinstance(message, dict):
-            openai_tool_calls = message.get("tool_calls", [])
-        else:
-            openai_tool_calls = getattr(message, "tool_calls", None) or []
+        openai_tool_calls = []
+        for choice in choices:
+            if isinstance(choice, dict):
+                message = choice.get("message", {})
+            else:
+                message = getattr(choice, "message", None)
+            if not message:
+                continue
+            if isinstance(message, dict):
+                openai_tool_calls.extend(message.get("tool_calls", []) or [])
+            else:
+                openai_tool_calls.extend(getattr(message, "tool_calls", None) or [])
 
         if not openai_tool_calls:
-            verbose_logger.debug("WebSearchInterception: Message has no tool_calls")
+            verbose_logger.debug("WebSearchInterception: Response has no tool_calls")
             return False, []
 
         # Find all WebSearch tool calls

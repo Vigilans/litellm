@@ -6,7 +6,7 @@ litellm.acompletion() for transparent server-side web search execution.
 """
 
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -110,6 +110,56 @@ async def test_websearch_chat_completion_with_openai():
     finally:
         # Restore original callbacks
         litellm.callbacks = original_callbacks
+
+
+@pytest.mark.asyncio
+async def test_websearch_chat_completion_detects_tool_calls_across_choices():
+    response = ModelResponse(
+        choices=[
+            {
+                "finish_reason": "tool_calls",
+                "index": 0,
+                "message": {"role": "assistant", "content": "Searching."},
+            },
+            {
+                "finish_reason": "tool_calls",
+                "index": 1,
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "litellm_web_search",
+                                "arguments": '{"query":"latest release"}',
+                            },
+                        }
+                    ],
+                },
+            },
+        ]
+    )
+
+    should_run, tool_calls = await WebSearchInterceptionLogger(
+        enabled_providers=[LlmProviders.OPENAI]
+    ).async_should_run_chat_completion_agentic_loop(
+        response=response,
+        model="gpt-4o",
+        messages=[],
+        tools=[
+            {
+                "type": "function",
+                "function": {"name": "litellm_web_search"},
+            }
+        ],
+        stream=False,
+        custom_llm_provider="openai",
+        kwargs={},
+    )
+
+    assert should_run is True
+    assert tool_calls["tool_calls"][0]["input"] == {"query": "latest release"}
 
 
 @pytest.mark.asyncio
