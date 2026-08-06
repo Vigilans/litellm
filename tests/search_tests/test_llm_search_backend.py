@@ -480,15 +480,31 @@ async def test_selected_endpoint_request_is_native_and_isolated(
     assert is_web_search_call.get() is False
 
     if endpoint == SearchModelEndpoint.RESPONSES:
-        assert seen["input"] == "q"
-        assert seen["tools"] == [{"type": "web_search"}]
+        expected_request = {
+            "model": "deployment-model",
+            "stream": False,
+            "input": "q",
+            "tools": [{"type": "web_search"}],
+        }
     elif endpoint == SearchModelEndpoint.ANTHROPIC_MESSAGES:
-        assert seen["messages"] == [{"role": "user", "content": "q"}]
-        assert seen["max_tokens"] == 2048
-        assert seen["tools"] == [{"type": "web_search_20250305", "name": "web_search"}]
+        expected_request = {
+            "model": "deployment-model",
+            "stream": False,
+            "messages": [{"role": "user", "content": "q"}],
+            "max_tokens": 2048,
+            "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        }
     else:
-        assert seen["messages"] == [{"role": "user", "content": "q"}]
-        assert seen["web_search_options"] == {}
+        expected_request = {
+            "model": "deployment-model",
+            "stream": False,
+            "messages": [{"role": "user", "content": "q"}],
+            "web_search_options": {},
+        }
+
+    for key, value in expected_request.items():
+        assert seen[key] == value
+    assert seen["proxy_server_request"] == {"body": expected_request}
 
 
 @pytest.mark.asyncio

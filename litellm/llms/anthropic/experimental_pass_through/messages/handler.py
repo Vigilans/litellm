@@ -146,6 +146,7 @@ async def _try_websearch_short_circuit(
     custom_llm_provider: Optional[str],
     stream: Optional[bool],
     deployment_model_name: Optional[str] = None,
+    request_data: Optional[Dict[str, Any]] = None,
 ) -> Optional[Union[AnthropicMessagesResponse, AsyncIterator]]:
     """
     Attempt to short-circuit a web-search-only request.
@@ -176,6 +177,7 @@ async def _try_websearch_short_circuit(
             tools=tools,
             custom_llm_provider=custom_llm_provider,
             deployment_model_name=deployment_model_name,
+            request_data=request_data,
         )
         if response is not None:
             anthropic_response = cast(AnthropicMessagesResponse, response)
@@ -276,6 +278,7 @@ async def anthropic_messages(
         deployment_model_name=(kwargs.get("litellm_metadata") or {}).get(
             "deployment_model_name"
         ),
+        request_data={**kwargs, "metadata": metadata},
     )
     if short_circuit_response is not None:
         return short_circuit_response

@@ -269,6 +269,36 @@ class TestShortCircuitEntryPoint:
         assert text_block["text"] == "results"
 
     @pytest.mark.asyncio
+    async def test_passes_request_metadata_to_short_circuit(self):
+        from litellm.llms.anthropic.experimental_pass_through.messages.handler import (
+            anthropic_messages,
+        )
+
+        metadata = {"user_id": "user-1"}
+        litellm_metadata = {"user_api_key_team_id": "team-1"}
+        response = {"type": "message", "content": []}
+        with patch("litellm.callbacks", []):
+            with patch(
+                "litellm.llms.anthropic.experimental_pass_through.messages.handler._try_websearch_short_circuit",
+                new=AsyncMock(return_value=response),
+            ) as short_circuit:
+                result = await anthropic_messages.__wrapped__(
+                    max_tokens=16,
+                    model="github_copilot/claude-sonnet-4",
+                    messages=[{"role": "user", "content": "search query"}],
+                    tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                    custom_llm_provider="github_copilot",
+                    metadata=metadata,
+                    litellm_metadata=litellm_metadata,
+                )
+
+        assert result is response
+        assert short_circuit.await_args.kwargs["request_data"] == {
+            "metadata": metadata,
+            "litellm_metadata": litellm_metadata,
+        }
+
+    @pytest.mark.asyncio
     async def test_returns_stream_iterator_when_streaming(self):
         """Streaming short-circuit → returns FakeAnthropicMessagesStreamIterator"""
         from litellm.llms.anthropic.experimental_pass_through.messages.fake_stream_iterator import (

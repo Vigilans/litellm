@@ -204,28 +204,50 @@ async def _call_selected_search_model(
         request_kwargs=kwargs,
     )
     optional_params = search_optional_params or {}
+    request_body = {
+        "model": call_kwargs.pop("model"),
+        "stream": call_kwargs.pop("stream"),
+    }
 
     token = is_web_search_call.set(True)
     try:
         if endpoint == SearchModelEndpoint.RESPONSES:
+            request_body.update(
+                {
+                    "input": query,
+                    "tools": [_responses_search_tool(optional_params)],
+                }
+            )
             response = await litellm.aresponses(
-                input=query,
-                tools=[_responses_search_tool(optional_params)],
+                **request_body,
+                proxy_server_request={"body": request_body},
                 **call_kwargs,
             )
             return responses_to_search_response(response=response, query=query)
         if endpoint == SearchModelEndpoint.ANTHROPIC_MESSAGES:
+            request_body.update(
+                {
+                    "max_tokens": call_kwargs.pop("max_tokens", 1024),
+                    "messages": [{"role": "user", "content": query}],
+                    "tools": [_messages_search_tool(optional_params)],
+                }
+            )
             response = await litellm.anthropic_messages(
-                max_tokens=call_kwargs.pop("max_tokens", 1024),
-                messages=[{"role": "user", "content": query}],
-                tools=[_messages_search_tool(optional_params)],
+                **request_body,
+                proxy_server_request={"body": request_body},
                 **call_kwargs,
             )
             return messages_to_search_response(response=response, query=query)
 
+        request_body.update(
+            {
+                "messages": [{"role": "user", "content": query}],
+                "web_search_options": _chat_search_options(optional_params),
+            }
+        )
         response = await litellm.acompletion(
-            messages=[{"role": "user", "content": query}],
-            web_search_options=_chat_search_options(optional_params),
+            **request_body,
+            proxy_server_request={"body": request_body},
             **call_kwargs,
         )
         return chat_to_search_response(response=response, query=query)

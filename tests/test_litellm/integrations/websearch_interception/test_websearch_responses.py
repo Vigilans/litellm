@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from litellm._internal_context import is_internal_call
 from litellm.integrations.websearch_interception.handler import (
     WebSearchInterceptionLogger,
 )
@@ -42,21 +43,30 @@ def _request_data(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_execute_search_uses_configured_router_search_tool():
+async def test_execute_search_preserves_request_metadata():
     handler = WebSearchInterceptionLogger(search_tool_name="llm-search")
     router = MagicMock()
     router.search_tools = [{"search_tool_name": "llm-search"}]
     router.asearch = AsyncMock(return_value=SearchResponse(results=[]))
+    request_data = {
+        "metadata": {"user_id": "user-1"},
+        "litellm_metadata": {"user_api_key_team_id": "team-1"},
+    }
 
     with patch.dict(
         "sys.modules",
         {"litellm.proxy.proxy_server": MagicMock(llm_router=router)},
     ):
-        await handler._execute_search("latest news")
+        await handler._execute_search("latest news", request_data=request_data)
 
-    router.asearch.assert_awaited_once_with(
-        query="latest news", search_tool_name="llm-search"
-    )
+    search_request = router.asearch.await_args.kwargs
+    assert search_request == {
+        "query": "latest news",
+        "search_tool_name": "llm-search",
+        **request_data,
+    }
+    assert search_request["metadata"] is not request_data["metadata"]
+    assert search_request["litellm_metadata"] is not request_data["litellm_metadata"]
 
 
 @pytest.mark.asyncio
@@ -94,7 +104,11 @@ async def test_responses_hook_replays_output_and_preserves_search_citations():
         return_value=("Title: Example", search_response)
     )
 
-    with patch("litellm.aresponses", new=AsyncMock(return_value=final)) as call:
+    async def follow_up(**kwargs):
+        assert is_internal_call.get() is False
+        return final
+
+    with patch("litellm.aresponses", new=AsyncMock(side_effect=follow_up)) as call:
         result = await handler.async_post_call_success_deployment_hook(
             _request_data(), initial, CallTypes.aresponses
         )

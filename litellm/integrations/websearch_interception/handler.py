@@ -14,7 +14,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import litellm
-from litellm._internal_context import is_internal_call, is_web_search_call
+from litellm._internal_context import is_web_search_call
 from litellm._logging import verbose_logger
 from litellm.anthropic_interface import messages as anthropic_messages
 from litellm.constants import LITELLM_WEB_SEARCH_TOOL_NAME
@@ -109,6 +109,7 @@ class WebSearchInterceptionLogger(CustomLogger):
         tools: Optional[List[Dict]],
         custom_llm_provider: Optional[str],
         deployment_model_name: Optional[str] = None,
+        request_data: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Short-circuit web-search-only requests by executing the search directly.
@@ -199,7 +200,9 @@ class WebSearchInterceptionLogger(CustomLogger):
         # Execute search — keep the structured SearchResponse so the native
         # block can carry per-result url/title/page_age.
         try:
-            search_result_text, structured = await self._execute_search(query)
+            search_result_text, structured = await self._execute_search(
+                query, request_data=request_data
+            )
         except Exception as e:
             verbose_logger.error(
                 f"WebSearchInterception: Short-circuit search failed: {e}"
@@ -736,7 +739,9 @@ class WebSearchInterceptionLogger(CustomLogger):
         search_results = await asyncio.gather(
             *[
                 (
-                    self._execute_search(tool_call["input"]["query"])
+                    self._execute_search(
+                        tool_call["input"]["query"], request_data=request_data
+                    )
                     if tool_call.get("input", {}).get("query")
                     else self._create_empty_search_result()
                 )
@@ -769,41 +774,36 @@ class WebSearchInterceptionLogger(CustomLogger):
                 logging_obj.dynamic_success_callbacks
             )
 
-        previous_internal = is_internal_call.get()
-        is_internal_call.set(True)
-        try:
-            follow_up: ResponsesAPIResponse = await litellm.aresponses(
-                model=request_data.get("model", model_name),
-                input=input_items + response_items + tool_results,
-                tools=tools,
-                tool_choice="auto",
-                custom_llm_provider=provider,
-                stream=False,
-                **{
-                    key: value
-                    for key, value in request_data.items()
-                    if key
-                    not in {
-                        "input",
-                        "model",
-                        "tools",
-                        "tool_choice",
-                        "stream",
-                        "custom_llm_provider",
-                        "litellm_call_id",
-                        "litellm_logging_obj",
-                    }
-                    and not key.startswith("_websearch_interception")
-                },
-                **callback_kwargs,
-                **{
-                    RESPONSES_LOOP_DEPTH_KEY: depth + 1,
-                    "_websearch_interception_responses_fingerprints": fingerprints
-                    + [fingerprint],
-                },
-            )
-        finally:
-            is_internal_call.set(previous_internal)
+        follow_up: ResponsesAPIResponse = await litellm.aresponses(
+            model=request_data.get("model", model_name),
+            input=input_items + response_items + tool_results,
+            tools=tools,
+            tool_choice="auto",
+            custom_llm_provider=provider,
+            stream=False,
+            **{
+                key: value
+                for key, value in request_data.items()
+                if key
+                not in {
+                    "input",
+                    "model",
+                    "tools",
+                    "tool_choice",
+                    "stream",
+                    "custom_llm_provider",
+                    "litellm_call_id",
+                    "litellm_logging_obj",
+                }
+                and not key.startswith("_websearch_interception")
+            },
+            **callback_kwargs,
+            **{
+                RESPONSES_LOOP_DEPTH_KEY: depth + 1,
+                "_websearch_interception_responses_fingerprints": fingerprints
+                + [fingerprint],
+            },
+        )
         structured = [result[1] for result in search_results if result[1] is not None]
         final_response = self._add_responses_citations(follow_up, structured)
         if request_data.get("_websearch_interception_converted_stream"):
@@ -1225,7 +1225,7 @@ class WebSearchInterceptionLogger(CustomLogger):
                 verbose_logger.debug(
                     f"WebSearchInterception: Queuing search for query='{query}'"
                 )
-                search_tasks.append(self._execute_search(query))
+                search_tasks.append(self._execute_search(query, request_data=kwargs))
             else:
                 verbose_logger.debug(
                     f"WebSearchInterception: Tool call {tool_call['id']} has no query"
@@ -1326,7 +1326,9 @@ class WebSearchInterceptionLogger(CustomLogger):
         )
         return patch, structured_results
 
-    async def _execute_search(self, query: str) -> Tuple[str, Optional[SearchResponse]]:
+    async def _execute_search(
+        self, query: str, request_data: Optional[Dict[str, Any]] = None
+    ) -> Tuple[str, Optional[SearchResponse]]:
         """
         Execute a single web search using router's search tools.
 
@@ -1359,9 +1361,15 @@ class WebSearchInterceptionLogger(CustomLogger):
                     search_tool_name = None
 
                 if search_tool_name:
+                    search_kwargs = {
+                        key: dict(request_data[key])
+                        for key in ("metadata", "litellm_metadata")
+                        if request_data and request_data.get(key)
+                    }
                     result = await llm_router.asearch(
                         query=query,
                         search_tool_name=search_tool_name,
+                        **search_kwargs,
                     )
                 else:
                     result = await litellm.asearch(
@@ -1445,7 +1453,7 @@ class WebSearchInterceptionLogger(CustomLogger):
                 verbose_logger.debug(
                     f"WebSearchInterception: Queuing search for query='{query}'"
                 )
-                search_tasks.append(self._execute_search(query))
+                search_tasks.append(self._execute_search(query, request_data=kwargs))
             else:
                 verbose_logger.debug(
                     f"WebSearchInterception: Tool call {tool_call.get('id')} has no query"
