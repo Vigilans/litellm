@@ -255,9 +255,14 @@ def is_web_search_tool(tool: Dict[str, Any]) -> bool:
     if tool_name == "web_search" and tool_type:
         return True
 
-    # Legacy "WebSearch" interception marker — only when no schema is
-    # present, so real client-side WebSearch tools (Cowork) pass through.
-    if tool_name == "WebSearch" and "input_schema" not in tool:
-        return True
+    # OpenAI Responses translation moves the client tool's schema from input_schema
+    # to parameters. Only a schema-less function is a legacy marker.
+    if tool_name == "WebSearch" and tool_type == "function":
+        return "parameters" not in tool
+
+    # Anthropic client tools carry input_schema. Only the original bare name is
+    # a legacy marker.
+    if tool_name == "WebSearch":
+        return "input_schema" not in tool
 
     return False

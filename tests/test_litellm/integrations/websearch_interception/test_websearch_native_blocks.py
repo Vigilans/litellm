@@ -138,6 +138,20 @@ class TestLegacyWebSearchNameGate:
         }
         assert not is_web_search_tool(cowork_tool)
 
+    def test_real_client_tool_after_responses_translation_passes_through(self):
+        responses_tool = {
+            "type": "function",
+            "name": "WebSearch",
+            "strict": False,
+            "description": "search",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        }
+        assert not is_web_search_tool(responses_tool)
+
     def test_real_client_tool_with_description_passes_through(self):
         # description-only client tools (no schema) are not valid Anthropic
         # tools; only the schema-bearing shape is the disambiguator. This
