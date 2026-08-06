@@ -417,7 +417,7 @@ def translate_anthropic_messages_response_to_responses_api_response(
 
     stop_reason = response.get("stop_reason")
     status, incomplete_details = _map_stop_reason(stop_reason)
-    return ResponsesAPIResponse(
+    translated_response = ResponsesAPIResponse(
         id=cast(str, response.get("id")),
         created_at=created_at,
         model=response.get("model"),
@@ -446,6 +446,8 @@ def translate_anthropic_messages_response_to_responses_api_response(
         user=request.get("user"),
         store=request.get("store"),
     )
+    translated_response._hidden_params = response.get("_hidden_params", {})
+    return translated_response
 
 
 def translate_content_block_to_output_item(

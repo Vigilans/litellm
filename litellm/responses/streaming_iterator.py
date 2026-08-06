@@ -15,6 +15,7 @@ import litellm
 from litellm.constants import (
     LITELLM_MAX_STREAMING_DURATION_SECONDS,
     STREAM_SSE_DONE_STRING,
+    WEBSEARCH_RESPONSES_OUTPUT_ITEMS_KEY,
 )
 from litellm.litellm_core_utils.asyncify import run_async_function
 from litellm.litellm_core_utils.core_helpers import process_response_headers
@@ -1149,21 +1150,30 @@ def _build_synthetic_response_events(
         ),
     ]
 
-    sequence_number = 0
-    for output_index, output_item in enumerate(
-        getattr(transformed, "output", []) or []
-    ):
+    output_items = list(
+        getattr(transformed, "_hidden_params", {}).get(
+            WEBSEARCH_RESPONSES_OUTPUT_ITEMS_KEY, []
+        )
+    ) + list(getattr(transformed, "output", []) or [])
+    completed_response = type(transformed)(
+        **{
+            **transformed.model_dump(),
+            "output": output_items,
+        }
+    )
+    for output_index, output_item in enumerate(output_items):
         output_item_payload = _dump_response_object(output_item)
         item_id = str(output_item_payload.get("id") or transformed.id)
         item_type = output_item_payload.get("type")
+        added_item_payload = dict(output_item_payload)
+        if item_type == "web_search_call":
+            added_item_payload["status"] = "in_progress"
 
         events.append(
             openai_types.OutputItemAddedEvent(
                 type=openai_types.ResponsesAPIStreamEvents.OUTPUT_ITEM_ADDED,
                 output_index=output_index,
-                item=openai_types.BaseLiteLLMOpenAIResponseObject(
-                    **output_item_payload
-                ),
+                item=openai_types.BaseLiteLLMOpenAIResponseObject(**added_item_payload),
             )
         )
 
@@ -1218,6 +1228,30 @@ def _build_synthetic_response_events(
                     arguments=arguments,
                 )
             )
+        elif item_type == "web_search_call":
+            search_event_types = (
+                (
+                    openai_types.WebSearchCallInProgressEvent,
+                    openai_types.ResponsesAPIStreamEvents.WEB_SEARCH_CALL_IN_PROGRESS,
+                ),
+                (
+                    openai_types.WebSearchCallSearchingEvent,
+                    openai_types.ResponsesAPIStreamEvents.WEB_SEARCH_CALL_SEARCHING,
+                ),
+                (
+                    openai_types.WebSearchCallCompletedEvent,
+                    openai_types.ResponsesAPIStreamEvents.WEB_SEARCH_CALL_COMPLETED,
+                ),
+            )
+            for event_class, event_type in search_event_types:
+                events.append(
+                    event_class(
+                        type=event_type,
+                        item_id=item_id,
+                        output_index=output_index,
+                        sequence_number=0,
+                    )
+                )
         elif item_type == "reasoning":
             for summary_index, summary in enumerate(
                 output_item_payload.get("summary", []) or []
@@ -1234,24 +1268,22 @@ def _build_synthetic_response_events(
                             delta=summary_text[i : i + chunk_size],
                         )
                     )
-                sequence_number += 1
                 events.append(
                     openai_types.ReasoningSummaryTextDoneEvent(
                         type=openai_types.ResponsesAPIStreamEvents.REASONING_SUMMARY_TEXT_DONE,
                         item_id=item_id,
                         output_index=output_index,
-                        sequence_number=sequence_number,
+                        sequence_number=0,
                         summary_index=summary_index,
                         text=summary_text,
                     )
                 )
-                sequence_number += 1
                 events.append(
                     openai_types.ReasoningSummaryPartDoneEvent(
                         type=openai_types.ResponsesAPIStreamEvents.REASONING_SUMMARY_PART_DONE,
                         item_id=item_id,
                         output_index=output_index,
-                        sequence_number=sequence_number,
+                        sequence_number=0,
                         summary_index=summary_index,
                         part=openai_types.BaseLiteLLMOpenAIResponseObject(
                             **summary_payload
@@ -1259,12 +1291,11 @@ def _build_synthetic_response_events(
                     )
                 )
 
-        sequence_number += 1
         events.append(
             openai_types.OutputItemDoneEvent(
                 type=openai_types.ResponsesAPIStreamEvents.OUTPUT_ITEM_DONE,
                 output_index=output_index,
-                sequence_number=sequence_number,
+                sequence_number=0,
                 item=openai_types.BaseLiteLLMOpenAIResponseObject(
                     **output_item_payload
                 ),
@@ -1274,9 +1305,11 @@ def _build_synthetic_response_events(
     events.append(
         openai_types.ResponseCompletedEvent(
             type=openai_types.ResponsesAPIStreamEvents.RESPONSE_COMPLETED,
-            response=transformed,
+            response=completed_response,
         )
     )
+    for sequence_number, event in enumerate(events):
+        event.sequence_number = sequence_number
     return events
 
 

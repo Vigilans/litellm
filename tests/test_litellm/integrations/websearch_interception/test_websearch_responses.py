@@ -172,6 +172,14 @@ async def test_responses_hook_restores_requested_stream():
         )
 
     assert isinstance(result, CachedResponsesAPIStreamingIterator)
+    events = list(result._events)
+    assert [
+        event.type.value for event in events if "web_search_call" in event.type.value
+    ] == [
+        "response.web_search_call.in_progress",
+        "response.web_search_call.searching",
+        "response.web_search_call.completed",
+    ]
 
 
 @pytest.mark.asyncio

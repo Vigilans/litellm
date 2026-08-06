@@ -47,6 +47,25 @@ def output_items(content, **kwargs):
     return [item.model_dump() for item in translate(content, **kwargs).output]
 
 
+def test_hidden_search_items_survive_response_translation():
+    response = translate(
+        [{"type": "text", "text": "answer"}],
+        _hidden_params={
+            "websearch_responses_output_items": [
+                {
+                    "type": "web_search_call",
+                    "id": "ws_1",
+                    "status": "completed",
+                }
+            ]
+        },
+    )
+
+    assert (
+        response._hidden_params["websearch_responses_output_items"][0]["id"] == "ws_1"
+    )
+
+
 class TestContentBlockMapping:
     def test_text_becomes_a_message_item(self):
         output = output_items([{"type": "text", "text": "hello"}])

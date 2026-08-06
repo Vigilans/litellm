@@ -1675,18 +1675,21 @@ class WebSearchCallInProgressEvent(BaseLiteLLMOpenAIResponseObject):
     type: Literal[ResponsesAPIStreamEvents.WEB_SEARCH_CALL_IN_PROGRESS]
     output_index: int
     item_id: str
+    sequence_number: int
 
 
 class WebSearchCallSearchingEvent(BaseLiteLLMOpenAIResponseObject):
     type: Literal[ResponsesAPIStreamEvents.WEB_SEARCH_CALL_SEARCHING]
     output_index: int
     item_id: str
+    sequence_number: int
 
 
 class WebSearchCallCompletedEvent(BaseLiteLLMOpenAIResponseObject):
     type: Literal[ResponsesAPIStreamEvents.WEB_SEARCH_CALL_COMPLETED]
     output_index: int
     item_id: str
+    sequence_number: int
 
 
 # MCP List Tools Events

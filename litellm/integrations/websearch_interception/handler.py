@@ -17,7 +17,10 @@ import litellm
 from litellm._internal_context import is_web_search_call
 from litellm._logging import verbose_logger
 from litellm.anthropic_interface import messages as anthropic_messages
-from litellm.constants import LITELLM_WEB_SEARCH_TOOL_NAME
+from litellm.constants import (
+    LITELLM_WEB_SEARCH_TOOL_NAME,
+    WEBSEARCH_RESPONSES_OUTPUT_ITEMS_KEY,
+)
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.integrations.websearch_interception.tools import (
     get_litellm_web_search_tool,
@@ -806,12 +809,14 @@ class WebSearchInterceptionLogger(CustomLogger):
         )
         structured = [result[1] for result in search_results if result[1] is not None]
         final_response = self._add_responses_citations(follow_up, structured)
+        final_response._hidden_params[WEBSEARCH_RESPONSES_OUTPUT_ITEMS_KEY] = (
+            self._build_responses_search_output_items(tool_calls)
+        )
         if request_data.get("_websearch_interception_converted_stream"):
             from litellm.responses.streaming_iterator import (
                 CachedResponsesAPIStreamingIterator,
             )
 
-            request_data["stream"] = True
             return CachedResponsesAPIStreamingIterator(
                 response=final_response,
                 logging_obj=request_data["litellm_logging_obj"],
@@ -947,6 +952,16 @@ class WebSearchInterceptionLogger(CustomLogger):
             "tool_type": "websearch",
             "response_format": "anthropic",
         }
+        if (kwargs.get("litellm_metadata") or {}).get(
+            "user_api_key_request_route"
+        ) in {
+            "/v1/responses",
+            "/responses",
+            "/openai/v1/responses",
+        }:
+            metadata[WEBSEARCH_RESPONSES_OUTPUT_ITEMS_KEY] = (
+                self._build_responses_search_output_items(tool_calls)
+            )
 
         # If the client request originally carried a native web_search_* tool,
         # pre-build the Anthropic-native ``web_search_tool_result`` blocks now
@@ -982,10 +997,38 @@ class WebSearchInterceptionLogger(CustomLogger):
         Anthropic-native clients (Claude Desktop, the Anthropic SDK) can
         render citations / sources alongside the model's textual reply.
         """
+        responses_output_items = plan.metadata.get(
+            WEBSEARCH_RESPONSES_OUTPUT_ITEMS_KEY
+        )
+        if responses_output_items:
+            if isinstance(response, dict):
+                hidden_params = response.setdefault("_hidden_params", {})
+            else:
+                hidden_params = getattr(response, "_hidden_params", {})
+                setattr(response, "_hidden_params", hidden_params)
+            hidden_params[WEBSEARCH_RESPONSES_OUTPUT_ITEMS_KEY] = responses_output_items
+
         native_blocks = plan.metadata.get(WEBSEARCH_NATIVE_BLOCKS_METADATA_KEY)
-        if not native_blocks:
-            return response
-        return self._inject_native_blocks(response, native_blocks)
+        if native_blocks:
+            return self._inject_native_blocks(response, native_blocks)
+        return response
+
+    @staticmethod
+    def _build_responses_search_output_items(tool_calls: List[Dict]) -> List[Dict]:
+        return [
+            {
+                "type": "web_search_call",
+                "id": tool_call.get("call_id")
+                or tool_call.get("id")
+                or f"ws_{uuid.uuid4().hex}",
+                "status": "completed",
+                "action": {
+                    "type": "search",
+                    "query": (tool_call.get("input") or {}).get("query", ""),
+                },
+            }
+            for tool_call in tool_calls
+        ]
 
     @staticmethod
     def _build_native_result_blocks(

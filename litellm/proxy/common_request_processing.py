@@ -1391,6 +1391,25 @@ class ProxyBaseLLMRequestProcessing:
                         )
                     # Non-streaming response - fall through to normal response handling
                 elif select_data_generator:
+                    if route_type == "aresponses" and self._is_streaming_request(
+                        data=self.data, is_streaming_request=is_streaming_request
+                    ):
+                        from litellm.responses.streaming_iterator import (
+                            CachedResponsesAPIStreamingIterator,
+                        )
+                        from litellm.types.llms.openai import ResponsesAPIResponse
+
+                        if isinstance(response, ResponsesAPIResponse):
+                            response = CachedResponsesAPIStreamingIterator(
+                                response=response,
+                                logging_obj=logging_obj,
+                                request_data=self.data,
+                                call_type="aresponses",
+                                custom_llm_provider=hidden_params.get(
+                                    "custom_llm_provider", ""
+                                ),
+                                cache_hit=None,
+                            )
                     selected_data_generator = select_data_generator(
                         response=response,
                         user_api_key_dict=user_api_key_dict,

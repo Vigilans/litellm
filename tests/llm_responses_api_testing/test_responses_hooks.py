@@ -791,6 +791,62 @@ def test_persist_completed_response_to_cache_guard_branches(monkeypatch, scenari
     assert iterator._completed_response_cached is expected_cached_flag
 
 
+def test_synthetic_stream_includes_search_items_in_events_and_completed_response():
+    transformed = ResponsesAPIResponse(
+        id="resp_search",
+        created_at=int(datetime.now().timestamp()),
+        status="completed",
+        model="gpt-5.6-sol",
+        object="response",
+        output=[
+            {
+                "type": "message",
+                "id": "msg_search",
+                "status": "completed",
+                "role": "assistant",
+                "content": [],
+            }
+        ],
+    )
+    transformed._hidden_params["websearch_responses_output_items"] = [
+        {
+            "type": "web_search_call",
+            "id": "ws_1",
+            "status": "completed",
+            "action": {"type": "search", "query": "latest news"},
+        }
+    ]
+
+    events = streaming_module._build_synthetic_response_events(
+        transformed=transformed,
+        logging_obj=_FakeLoggingObj(),
+        chunk_size=5,
+    )
+
+    assert [event.type.value for event in events] == [
+        "response.created",
+        "response.in_progress",
+        "response.output_item.added",
+        "response.web_search_call.in_progress",
+        "response.web_search_call.searching",
+        "response.web_search_call.completed",
+        "response.output_item.done",
+        "response.output_item.added",
+        "response.output_item.done",
+        "response.completed",
+    ]
+    assert [event.sequence_number for event in events] == list(range(len(events)))
+    assert events[2].output_index == 0
+    assert events[2].item.status == "in_progress"
+    assert events[6].output_index == 0
+    assert events[6].item.status == "completed"
+    assert events[7].output_index == 1
+    assert [item.type for item in events[-1].response.output] == [
+        "web_search_call",
+        "message",
+    ]
+
+
 def test_build_synthetic_response_events_covers_annotations_function_calls_and_refusals():
     original_include_cost = litellm.include_cost_in_streaming_usage
     litellm.include_cost_in_streaming_usage = True
